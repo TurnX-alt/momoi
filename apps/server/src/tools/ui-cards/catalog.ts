@@ -16,6 +16,7 @@
 
 import type { CardComponent, ToolSchemaProperty } from '@momoi/shared/types'
 import { parseFormula } from '@momoi/shared/formula'
+import { CHARACTER_GESTURES, CHARACTER_POSE_BONES } from '@momoi/shared/constants'
 
 export interface CardComponentSpec {
   /** 卡片组件名（shared CardComponent 联合） */
@@ -463,11 +464,38 @@ const appSpec: CardComponentSpec = {
 // ---- 3D 角色（VRM）----
 
 function validateCharacterProps(props: Record<string, unknown>): string | null {
+  const errs: string[] = []
   for (const k of ['model', 'animation'] as const) {
     const v = props[k]
-    if (typeof v === 'string' && v.includes('..')) return `${k} 路径不合法（不得包含「..」）`
+    if (typeof v === 'string' && v.includes('..')) errs.push(`${k} 路径不合法（不得包含「..」）`)
   }
-  return null
+
+  // 实时表演编排（D59）：gesture 走语义手势库，pose 走姿态逃生舱
+  const acts = props.acts as Array<Record<string, unknown>> | undefined
+  if (Array.isArray(acts)) {
+    acts.forEach((a, i) => {
+      const type = a.type
+      if (type === 'gesture') {
+        if (!a.gesture) {
+          errs.push(`acts[${i}]：type=gesture 时必须提供 gesture`)
+        }
+        if (a.pose) errs.push(`acts[${i}]：type=gesture 不应携带 pose`)
+      } else if (type === 'pose') {
+        const pose = a.pose as { bones?: unknown } | undefined
+        const bones = pose && Array.isArray(pose.bones) ? (pose.bones as Array<Record<string, unknown>>) : []
+        if (bones.length === 0) {
+          errs.push(`acts[${i}]：type=pose 必须提供 pose.bones（1-10 根）`)
+        }
+        bones.forEach((b, j) => {
+          if (b.x === undefined && b.y === undefined && b.z === undefined) {
+            errs.push(`acts[${i}].pose.bones[${j}]（${String(b.bone)}）未提供任何角度——至少给 x/y/z 之一`)
+          }
+        })
+        if (a.times !== undefined) errs.push(`acts[${i}]：times 仅用于 gesture（pose 用 pose.hold 控制时长）`)
+      }
+    })
+  }
+  return errs.length ? errs.join('；') : null
 }
 
 const characterSpec: CardComponentSpec = {
@@ -480,7 +508,9 @@ const characterSpec: CardComponentSpec = {
     'model：用户提供的文件名（服务端 vrm 目录，如 "cinnamon.vrm"）或 https 直链；省略时用内置官方示例模型做演示。' +
     'animation：.vrma 动作文件（文件名或直链，可选；缺省播放程序化呼吸 idle）。' +
     'expression：表情名与权重（0-1）——名称依模型预设（常见 happy/angry/sad/relaxed/surprised/blink 等），未知名称自动忽略。' +
-    'caption：角色台词，显示在模型下方。' +
+    'acts：**实时表演编排**（可选，≤8 个）——type=gesture 从语义手势库选（wave 挥手/nod 点头/shake_head 摇头/tilt_head 歪头/bow 鞠躬/clap 鼓掌/shrug 耸肩/think 思考/point 指/jump 蹦跳/hands_on_hips 叉腰/shy 害羞/salute 敬礼/heart 比心/dance 律动/stretch 伸懒腰），可配 at（起始秒，默认接续上一 act）与 times（重复次数）；type=pose 是姿态逃生舱（自定义骨骼欧拉角 ≤10 根、±135°、pose.hold 保持秒数）——**你没有视觉反馈，自定义姿势容易不自然，能用语义手势表达就用手势**。' +
+    '优先级：animation（.vrma）> acts > 程序化 idle。' +
+    'caption：角色台词，显示在模型下方（每轮现写、实时生效）。' +
     '何时用：用户想看某个角色的 3D 形象、需要展示动作或表情时。' +
     '注意：不要编造不存在的模型文件名——用户未提供资产时可用默认示例模型，或先询问用户想展示谁。',
   propsSchema: {
@@ -495,7 +525,7 @@ const characterSpec: CardComponentSpec = {
       type: 'string',
       minLength: 1,
       maxLength: 300,
-      description: '.vrma 动作文件：文件名或 https 直链（可选）',
+      description: '.vrma 动作文件：文件名或 https 直链（可选；提供时 acts 被忽略）',
     },
     expression: {
       type: 'array',
@@ -507,6 +537,45 @@ const characterSpec: CardComponentSpec = {
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 30, description: '表情名，如 happy / surprised / blink' },
           weight: { type: 'number', minimum: 0, maximum: 1, description: '权重 0-1（默认 1）' },
+        },
+      },
+    },
+    acts: {
+      type: 'array',
+      maxItems: 8,
+      description: '实时表演编排（可选）——手势走语义库、自定义姿势走姿态逃生舱',
+      items: {
+        type: 'object',
+        required: ['type'],
+        properties: {
+          type: { type: 'string', enum: ['gesture', 'pose'], description: 'gesture=语义手势库；pose=自定义骨骼姿态' },
+          gesture: { type: 'string', enum: [...CHARACTER_GESTURES], description: '手势名（type=gesture 必填）' },
+          pose: {
+            type: 'object',
+            required: ['bones'],
+            description: '姿态定义（type=pose 必填）',
+            properties: {
+              bones: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 10,
+                description: '骨骼姿态（欧拉角，度；__root 为整体位移，米）',
+                items: {
+                  type: 'object',
+                  required: ['bone'],
+                  properties: {
+                    bone: { type: 'string', enum: [...CHARACTER_POSE_BONES], description: '骨骼名' },
+                    x: { type: 'number', minimum: -135, maximum: 135 },
+                    y: { type: 'number', minimum: -135, maximum: 135 },
+                    z: { type: 'number', minimum: -135, maximum: 135 },
+                  },
+                },
+              },
+              hold: { type: 'number', minimum: 0.3, maximum: 15, description: '保持秒数（默认 2）' },
+            },
+          },
+          at: { type: 'number', minimum: 0, maximum: 30, description: '起始秒（可选；默认接续上一 act）' },
+          times: { type: 'integer', minimum: 1, maximum: 5, description: '重复次数（仅 gesture，默认 1）' },
         },
       },
     },

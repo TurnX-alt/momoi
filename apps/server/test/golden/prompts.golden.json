@@ -457,7 +457,7 @@
         "ctx": {
           "name": "ui_character"
         },
-        "text": "渲染 3D 角色卡片：加载 VRM 虚拟角色模型，展示表情与动作动画。model：用户提供的文件名（服务端 vrm 目录，如 \"cinnamon.vrm\"）或 https 直链；省略时用内置官方示例模型做演示。animation：.vrma 动作文件（文件名或直链，可选；缺省播放程序化呼吸 idle）。expression：表情名与权重（0-1）——名称依模型预设（常见 happy/angry/sad/relaxed/surprised/blink 等），未知名称自动忽略。caption：角色台词，显示在模型下方。何时用：用户想看某个角色的 3D 形象、需要展示动作或表情时。注意：不要编造不存在的模型文件名——用户未提供资产时可用默认示例模型，或先询问用户想展示谁。"
+        "text": "渲染 3D 角色卡片：加载 VRM 虚拟角色模型，展示表情与动作动画。model：用户提供的文件名（服务端 vrm 目录，如 \"cinnamon.vrm\"）或 https 直链；省略时用内置官方示例模型做演示。animation：.vrma 动作文件（文件名或直链，可选；缺省播放程序化呼吸 idle）。expression：表情名与权重（0-1）——名称依模型预设（常见 happy/angry/sad/relaxed/surprised/blink 等），未知名称自动忽略。acts：**实时表演编排**（可选，≤8 个）——type=gesture 从语义手势库选（wave 挥手/nod 点头/shake_head 摇头/tilt_head 歪头/bow 鞠躬/clap 鼓掌/shrug 耸肩/think 思考/point 指/jump 蹦跳/hands_on_hips 叉腰/shy 害羞/salute 敬礼/heart 比心/dance 律动/stretch 伸懒腰），可配 at（起始秒，默认接续上一 act）与 times（重复次数）；type=pose 是姿态逃生舱（自定义骨骼欧拉角 ≤10 根、±135°、pose.hold 保持秒数）——**你没有视觉反馈，自定义姿势容易不自然，能用语义手势表达就用手势**。优先级：animation（.vrma）> acts > 程序化 idle。caption：角色台词，显示在模型下方（每轮现写、实时生效）。何时用：用户想看某个角色的 3D 形象、需要展示动作或表情时。注意：不要编造不存在的模型文件名——用户未提供资产时可用默认示例模型，或先询问用户想展示谁。"
       }
     ]
   }

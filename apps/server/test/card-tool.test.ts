@@ -371,6 +371,65 @@ describe('ui_character', () => {
     expect(r.error).toBe(true)
     expect(r.summary).toContain('expression[0].name: 必填字段缺失')
   })
+
+  it('acts：手势编排（at/times）合法产出', async () => {
+    const r = await exec({
+      caption: '欢迎回来喵～',
+      acts: [
+        { type: 'gesture', gesture: 'wave', at: 0, times: 2 },
+        { type: 'gesture', gesture: 'tilt_head', at: 2 },
+      ],
+    })
+    expect(r.error).toBeUndefined()
+    const card = cardOf(r.data)
+    expect((card.props as { acts: unknown[] }).acts).toHaveLength(2)
+  })
+
+  it('acts：姿态逃生舱合法产出', async () => {
+    const r = await exec({
+      acts: [
+        { type: 'pose', pose: { bones: [{ bone: 'head', x: 12, z: -6 }, { bone: '__root', y: 0.1 }], hold: 1.5 } },
+      ],
+    })
+    expect(r.error).toBeUndefined()
+  })
+
+  it('acts：非法手势名被 schema enum 拦截', async () => {
+    const r = await exec({ acts: [{ type: 'gesture', gesture: 'moonwalk' }] })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('只允许')
+  })
+
+  it('acts：gesture 缺手势名 / pose 缺骨骼 被拒绝', async () => {
+    const r1 = await exec({ acts: [{ type: 'gesture' }] })
+    expect(r1.error).toBe(true)
+    expect(r1.summary).toContain('必须提供 gesture')
+
+    // 空数组 → 通用 schema 层（minItems）
+    const r2 = await exec({ acts: [{ type: 'pose', pose: { bones: [] } }] })
+    expect(r2.error).toBe(true)
+    expect(r2.summary).toContain('至少 1 项')
+
+    // 整个 pose 缺失 → extraValidate 层
+    const r3 = await exec({ acts: [{ type: 'pose' }] })
+    expect(r3.error).toBe(true)
+    expect(r3.summary).toContain('必须提供 pose.bones')
+  })
+
+  it('acts：pose 骨骼未给任何角度 / pose 携带 times 被拒绝', async () => {
+    const r1 = await exec({ acts: [{ type: 'pose', pose: { bones: [{ bone: 'head' }] } }] })
+    expect(r1.error).toBe(true)
+    expect(r1.summary).toContain('未提供任何角度')
+    const r2 = await exec({ acts: [{ type: 'pose', pose: { bones: [{ bone: 'head', x: 10 }] }, times: 2 }] })
+    expect(r2.error).toBe(true)
+    expect(r2.summary).toContain('times 仅用于 gesture')
+  })
+
+  it('acts：未知骨骼名被 schema enum 拦截', async () => {
+    const r = await exec({ acts: [{ type: 'pose', pose: { bones: [{ bone: 'tail', x: 10 }] } }] })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('只允许')
+  })
 })
 
 describe('catalog 一致性', () => {
