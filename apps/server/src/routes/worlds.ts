@@ -14,12 +14,21 @@
 import { Hono } from 'hono'
 import { randomUUID } from 'crypto'
 import { ErrCode } from '@momoi/shared/errors'
+import type { WorldInfo } from '@momoi/shared/types'
 import { db, conversations, groupConversationAgents, agents, worlds } from '../db/index.js'
 import { eq, and, sql } from 'drizzle-orm'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 import { ApiError } from '../lib/apiError.js'
 import { broadcastConversationSync } from '../lib/realtime.js'
+import {
+  parseStateDefs,
+  parseStateValues,
+  reconcileStored,
+  reconcileView,
+  validateStates,
+  validateValueEdit,
+} from '../lib/world-state.js'
 import { trackUserActivity } from './user.js'
 import { resolveWorkspaceAnchor } from './workspaces.js'
 
@@ -38,6 +47,8 @@ async function findWorld(conversationId: string, userId: string) {
   const row = await db.select({
     conversation_id: worlds.conversation_id,
     laws: worlds.laws,
+    states: worlds.states,
+    state_values: worlds.state_values,
     created_at: worlds.created_at,
     updated_at: worlds.updated_at,
   })
@@ -52,8 +63,30 @@ async function findWorld(conversationId: string, userId: string) {
   return row ?? null
 }
 
+type WorldRow = {
+  conversation_id: string
+  laws: string
+  states: string | null
+  state_values: string | null
+  created_at: number
+  updated_at: number
+}
+
+/** 行 → 响应形态：解析 JSON 列 + 按当前成员对账视图（GET / POST / PATCH 共用） */
+function toWorldResponse(row: WorldRow, memberIds: string[]): WorldInfo {
+  const defs = parseStateDefs(row.states)
+  return {
+    conversation_id: row.conversation_id,
+    laws: row.laws,
+    states: defs,
+    state_values: reconcileView(defs, parseStateValues(row.state_values), memberIds),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }
+}
+
 /** 世界成员（结构与群聊成员完全同构） */
-async function listWorldAgents(conversationId: string) {
+async function listWorldAgents(conversationId: string): Promise<Array<{ id: string; name: string; avatar: string }>> {
   const rows = await db.select({
     agent_id: groupConversationAgents.agent_id,
     name: agents.name,
@@ -87,6 +120,7 @@ worldsRoute.post('/', async (c) => {
 
   const body = await c.req.json<{
     laws?: string
+    states?: unknown
     agent_ids?: string[]
     title?: string
     workspace_id?: string | null
@@ -96,6 +130,12 @@ worldsRoute.post('/', async (c) => {
   const agentIds = (body.agent_ids ?? []).filter((id) => id && id !== NEUTRAL_AGENT_ID)
   if (agentIds.length < 1) {
     throw new ApiError(ErrCode.WORLD_AGENTS_REQUIRED)
+  }
+
+  // 状态定义（默认无状态：缺省 = []）；校验失败 400，reason 面向编辑器
+  const statesCheck = validateStates(body.states ?? [])
+  if (!statesCheck.ok) {
+    throw new ApiError(ErrCode.WORLD_STATES_INVALID, { detail: statesCheck.reason })
   }
 
   // 分组工作区：创建时锁定（永不 UPDATE）；归属校验失败统一 404 防探测
@@ -125,6 +165,8 @@ worldsRoute.post('/', async (c) => {
   await db.insert(worlds).values({
     conversation_id: convId,
     laws: (body.laws ?? '').trim().slice(0, MAX_TEXT_LENGTH),
+    states: JSON.stringify(statesCheck.value),
+    state_values: JSON.stringify({}),
     created_at: now,
     updated_at: now,
   }).run()
@@ -134,7 +176,7 @@ worldsRoute.post('/', async (c) => {
 
   const world = await findWorld(convId, userId)
   const conv = await db.select().from(conversations).where(eq(conversations.id, convId)).get()
-  return c.json({ conversation: conv, world }, 201)
+  return c.json({ conversation: conv, world: world ? toWorldResponse(world, agentIds) : null }, 201)
 })
 
 // 读取世界（法则 + 成员）。归属校验在 findWorld（含 deleted_at 过滤）。
@@ -146,29 +188,60 @@ worldsRoute.get('/:id', async (c) => {
   const world = await findWorld(id, userId)
   if (!world) throw new ApiError(ErrCode.WORLD_NOT_FOUND)
 
-  return c.json({ world, agents: await listWorldAgents(id) })
+  const members = await listWorldAgents(id)
+  return c.json({ world: toWorldResponse(world, members.map((m) => m.id)), agents: members })
 })
 
-// 编辑世界法则 —— 世界唯一的可变项。
+// 编辑世界 —— 三个可变项：法则 / 状态定义（全量替换 + 就地持久对账）/ 状态当前值（手动修正）。
 worldsRoute.patch('/:id', async (c) => {
   const userId = getUserId(c)
   if (!userId) throw new ApiError(ErrCode.UNAUTHORIZED)
 
   const id = c.req.param('id')
-  const body = await c.req.json<{ laws?: string }>()
+  const body = await c.req.json<{ laws?: unknown; states?: unknown; values?: unknown }>()
 
-  if (typeof body.laws !== 'string') {
+  const hasLaws = typeof body.laws === 'string'
+  const hasStates = body.states !== undefined
+  const hasValues = body.values !== undefined
+  if (!hasLaws && !hasStates && !hasValues) {
     throw new ApiError(ErrCode.WORLD_NOTHING_TO_UPDATE)
   }
 
   const existing = await findWorld(id, userId)
   if (!existing) throw new ApiError(ErrCode.WORLD_NOT_FOUND)
 
-  const laws = body.laws.trim().slice(0, MAX_TEXT_LENGTH)
-  const now = Math.floor(Date.now() / 1000)
-  await db.update(worlds).set({ laws, updated_at: now })
-    .where(eq(worlds.conversation_id, id)).run()
+  const members = await listWorldAgents(id)
+  const memberIds = members.map((m) => m.id)
+
+  let defs = parseStateDefs(existing.states)
+  let stored = parseStateValues(existing.state_values)
+  const patch: Record<string, unknown> = { updated_at: Math.floor(Date.now() / 1000) }
+
+  if (hasLaws) {
+    patch.laws = (body.laws as string).trim().slice(0, MAX_TEXT_LENGTH)
+  }
+
+  if (hasStates) {
+    const check = validateStates(body.states)
+    if (!check.ok) throw new ApiError(ErrCode.WORLD_STATES_INVALID, { detail: check.reason })
+    // 定义全量替换 + 就地持久对账：新增属性全员补默认；删除/改名随成员行重建丢弃
+    defs = check.value
+    stored = reconcileStored(defs, stored, memberIds)
+    patch.states = JSON.stringify(defs)
+    patch.state_values = JSON.stringify(stored)
+  }
+
+  if (hasValues) {
+    const check = validateValueEdit(body.values, defs, memberIds)
+    if (!check.ok) throw new ApiError(ErrCode.WORLD_STATE_VALUE_INVALID, { detail: check.reason })
+    for (const [agentId, attrs] of Object.entries(check.value)) {
+      stored[agentId] = { ...(stored[agentId] ?? {}), ...attrs }
+    }
+    patch.state_values = JSON.stringify(stored)
+  }
+
+  await db.update(worlds).set(patch).where(eq(worlds.conversation_id, id)).run()
 
   const world = await findWorld(id, userId)
-  return c.json({ world })
+  return c.json({ world: world ? toWorldResponse(world, memberIds) : null })
 })

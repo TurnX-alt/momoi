@@ -96,6 +96,8 @@
     "WORLD_AGENTS_REQUIRED": "At least one agent is required",
     "WORLD_NOTHING_TO_UPDATE": "Nothing to update",
     "WORLD_NOT_FOUND": "World not found",
+    "WORLD_STATES_INVALID": "Invalid state definition: {{detail}}",
+    "WORLD_STATE_VALUE_INVALID": "Invalid state value: {{detail}}",
     "MEMORY_AGENT_ID_REQUIRED": "agent_id required",
     "MEMORY_CONTENT_EMPTY": "Content is required",
     "MEMORY_CONTENT_TOO_LONG": "Content too long (max {{limit}} characters)",

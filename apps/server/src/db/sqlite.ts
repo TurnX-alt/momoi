@@ -52,6 +52,21 @@ export async function initSqlite() {
     // Column already exists, safe to ignore
   }
 
+  // Migration: add states / state_values（世界模拟「Agent 状态」；见 docs/specs/module-world.md）
+  // 无 DEFAULT：旧库既有行读到 NULL 由 lib/world-state.ts 统一容错（跟随 stats 先例）
+  try {
+    sqlDb.run(`ALTER TABLE worlds ADD COLUMN states TEXT`)
+    console.log('[db] Migration: added states to worlds')
+  } catch {
+    // Column already exists, safe to ignore
+  }
+  try {
+    sqlDb.run(`ALTER TABLE worlds ADD COLUMN state_values TEXT`)
+    console.log('[db] Migration: added state_values to worlds')
+  } catch {
+    // Column already exists, safe to ignore
+  }
+
   // Persistent index creation — safe to run on every startup
   sqlDb.run(`CREATE INDEX IF NOT EXISTS idx_qq_group_conv_app ON qq_group_conversations(app_id)`)
   sqlDb.run(`CREATE INDEX IF NOT EXISTS idx_qq_bindings_conv ON qq_bindings(conversation_id)`)

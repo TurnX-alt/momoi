@@ -144,6 +144,8 @@ export const MIGRATION_SQL = `
   CREATE TABLE IF NOT EXISTS worlds (
     conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
     laws            TEXT NOT NULL DEFAULT '',  -- 可变：世界法则
+    states          TEXT,                      -- 可变：状态属性定义（JSON [{name, default, description}]）；NULL = 无状态
+    state_values    TEXT,                      -- 可变：状态当前值（JSON {agentId: {属性名: 值}}）；NULL = 全默认
     created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at      INTEGER NOT NULL DEFAULT (unixepoch())
   );

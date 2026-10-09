@@ -37,7 +37,7 @@ import type {
 import { Type } from '@sinclair/typebox'
 import type { TSchema } from '@sinclair/typebox'
 
-import type { AppConfig, Agent, CardDescriptor, ConversationStats, ServerMessage, ToolDefinition, TraceEntry } from '@momoi/shared/types'
+import type { AppConfig, Agent, CardDescriptor, ConversationStats, ServerMessage, ToolDefinition, TraceEntry, WorldStateRuntime } from '@momoi/shared/types'
 import { ErrCode } from '@momoi/shared/errors'
 import { ApiError } from '../lib/apiError.js'
 import {
@@ -964,8 +964,9 @@ export interface RunPiAgentLoopOptions {
   /** 强制合规重试：将原始提问预搬迁到对话历史，以合规占位提示词作为当前提问
    *  在首次模型调用前即完成绕过，而非等空回复再搬迁。 */
   forceCompliance?: boolean
-  /** 世界模拟上下文：存在时系统提示注入「世界模拟」块（替代群组对话规则块的身份框架） */
-  world?: { laws: string }
+  /** 世界模拟上下文：存在时系统提示注入「世界模拟」块（替代群组对话规则块的身份框架）；
+   *  运行态全量（法则 + 状态定义 + 当前值），由编排器按 Agent 重取快照 */
+  world?: WorldStateRuntime
   /** 生成式卡片（ui_* 工具 + 卡片目录片段）开关：false = 结构性关闭（IM 渠道）。
    *  缺省 true（网页版）。三重门（工具 / 提示词 / 历史）见 D56 与
    *  docs/specs/module-intelligent-ui.md。 */

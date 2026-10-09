@@ -165,6 +165,10 @@ export enum ErrCode {
   WORLD_AGENTS_REQUIRED = 'WORLD_AGENTS_REQUIRED',
   WORLD_NOTHING_TO_UPDATE = 'WORLD_NOTHING_TO_UPDATE',
   WORLD_NOT_FOUND = 'WORLD_NOT_FOUND',
+  /** 状态属性定义不合法（创建 / 编辑世界时校验失败）；params.detail = 原因摘要 */
+  WORLD_STATES_INVALID = 'WORLD_STATES_INVALID',
+  /** 状态当前值不合法（手动修正时校验失败）；params.detail = 原因摘要 */
+  WORLD_STATE_VALUE_INVALID = 'WORLD_STATE_VALUE_INVALID',
 
   // ---- MEMORY ----
   MEMORY_AGENT_ID_REQUIRED = 'MEMORY_AGENT_ID_REQUIRED',
@@ -395,6 +399,8 @@ export const ERR_REGISTRY: Readonly<Record<ErrCode, ErrMeta>> = {
   [ErrCode.WORLD_AGENTS_REQUIRED]: { status: 400 },
   [ErrCode.WORLD_NOTHING_TO_UPDATE]: { status: 400 },
   [ErrCode.WORLD_NOT_FOUND]: { status: 404 },
+  [ErrCode.WORLD_STATES_INVALID]: { status: 400, params: ['detail'] },
+  [ErrCode.WORLD_STATE_VALUE_INVALID]: { status: 400, params: ['detail'] },
 
   // MEMORY
   [ErrCode.MEMORY_AGENT_ID_REQUIRED]: { status: 400 },

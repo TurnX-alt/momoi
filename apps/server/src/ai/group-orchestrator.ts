@@ -4,7 +4,7 @@
 
 import { runPiAgentLoop, type RunPiAgentLoopResult } from './pi-adapter.js'
 import type { ChatMessage, ContentPart } from './provider.js'
-import type { ConversationStats, ServerMessage, Agent, TraceEntry } from '@momoi/shared/types'
+import type { ConversationStats, ServerMessage, Agent, TraceEntry, WorldStateRuntime } from '@momoi/shared/types'
 import { ApiError } from '../lib/apiError.js'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
@@ -30,8 +30,9 @@ interface GroupOrchestratorOptions {
   /** 强制合规重试：透传给每个 Agent 的推理循环（原始提问预搬迁至历史绕过审查） */
   forceCompliance?: boolean
   /** 世界模拟上下文：存在时本轮是世界回合 —— 用户消息是「来自世界的变动」
-   *  而非用户发言，各 Agent 以世界中的存在身份回应（法则注入系统提示） */
-  world?: { laws: string }
+   *  而非用户发言，各 Agent 以世界中的存在身份回应（法则 + 状态注入系统提示）。
+   *  运行态快照与工具句柄见 lib/world-state.ts（同轮每 Agent 重取以保证新鲜度）。 */
+  world?: WorldStateRuntime
   saveMessage: (
     agentId: string,
     agentName: string,

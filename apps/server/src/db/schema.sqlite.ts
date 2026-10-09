@@ -140,10 +140,14 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
   uniqueIndex('uq_push_user_device').on(t.user_id, t.device_id),
 ])
 
-// 世界模拟侧表：与 conversations 1:1。法则可随时修改。
+// 世界模拟侧表：与 conversations 1:1。法则与状态（定义 + 当前值）可随时修改。
 export const worlds = sqliteTable('worlds', {
   conversation_id: text('conversation_id').primaryKey().references(() => conversations.id, { onDelete: 'cascade' }),
   laws: text('laws').notNull().default(''),
+  // JSON: WorldStateDef[]（状态属性定义）；NULL = 无状态（默认没有任何状态）
+  states: text('states'),
+  // JSON: WorldStateValues（各成员当前值；存储保留已移除成员的历史值，读取时过滤）
+  state_values: text('state_values'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
 })

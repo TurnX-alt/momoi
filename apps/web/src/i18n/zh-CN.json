@@ -96,6 +96,8 @@
     "WORLD_AGENTS_REQUIRED": "必须选择至少一个 Agent",
     "WORLD_NOTHING_TO_UPDATE": "没有需要更新的内容",
     "WORLD_NOT_FOUND": "世界不存在",
+    "WORLD_STATES_INVALID": "状态定义不合法：{{detail}}",
+    "WORLD_STATE_VALUE_INVALID": "状态值不合法：{{detail}}",
     "MEMORY_AGENT_ID_REQUIRED": "缺少 agent_id",
     "MEMORY_CONTENT_EMPTY": "内容不能为空",
     "MEMORY_CONTENT_TOO_LONG": "内容过长（上限 {{limit}} 字符）",

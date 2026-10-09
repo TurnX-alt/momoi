@@ -185,6 +185,9 @@ export async function initPg(dbUrl: string, user: string, password: string) {
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT`)
   // 会话状态条统计（JSON），见 docs/specs/module-chat.md
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS stats TEXT`)
+  // 世界模拟「Agent 状态」（JSON），见 docs/specs/module-world.md
+  await pool.query(`ALTER TABLE worlds ADD COLUMN IF NOT EXISTS states TEXT`)
+  await pool.query(`ALTER TABLE worlds ADD COLUMN IF NOT EXISTS state_values TEXT`)
 
   const db = drizzlePg(pool, { schema }) as any
   console.log('[db] PostgreSQL ready')

@@ -86,11 +86,34 @@ export interface ConversationSearchResult {
   snippet?: string
 }
 
+/** 世界状态 · 属性定义（worlds.states JSON 内一项）。约束见
+ *  docs/specs/module-world.md：属性名 ≤20 字且唯一；默认值/值 ≤60 字符、
+ *  单行、禁「|」（轮末结算的行解析格式护栏）。 */
+export interface WorldStateDef {
+  /** 属性名 */
+  name: string
+  /** 默认值（仅用于初始化；显示字符串） */
+  default: string
+  /** 属性描述（≤100 字，可选；注入提示词帮助模型理解语义） */
+  description?: string
+}
+
+/** 世界状态 · 当前值：agentId → { 属性名 → 值 }。值统一为显示字符串
+ *  （数值语义由前端按可解析性自行呈现，如方向箭头）。 */
+export type WorldStateValues = Record<string, Record<string, string>>
+
+/** 世界运行态（法则 + 状态定义 + 当前值）——编排器 / 提示词片段 /
+ *  update_state 工具 / 轮末结算共用的已解析视图。 */
+export interface WorldStateRuntime {
+  laws: string
+  states: WorldStateDef[]
+  state_values: WorldStateValues
+}
+
 /** 世界模拟的侧表信息（worlds 行）。世界模拟是纯文本群聊的变体：
- *  只有「法则」（可随时修改）一个文本属性。 */
-export interface WorldInfo {
+ *  两个可变维度 —— 法则（每轮注入系统提示词）与状态（定义 + 各成员当前值）。 */
+export interface WorldInfo extends WorldStateRuntime {
   conversation_id: string
-  laws: string         // 世界法则（可随时修改，每轮注入系统提示词）
   created_at: number
   updated_at: number
 }
@@ -118,9 +141,11 @@ export interface ToolCall {
 
 // ---- Intelligent UI Cards（生成式卡片）----
 
-/** 卡片组件名——v1 全集一次定死（trace/SSE 历史数据稳定），前端注册表分期充实。
+/** 卡片组件名。v1 的七种模型可生成卡型一次定死（trace/SSE 历史数据稳定），
+ *  前端注册表分期充实；'state' 为引擎合成卡（世界模拟状态变更——非 ui_* 工具
+ *  声明，见 docs/specs/module-world.md 与 module-intelligent-ui.md 的引擎合成章节）。
  *  协议与实施见 docs/specs/module-intelligent-ui.md。 */
-export type CardComponent = 'chart' | 'stat' | 'table' | 'diagram' | 'form' | 'app' | 'character'
+export type CardComponent = 'chart' | 'stat' | 'table' | 'diagram' | 'form' | 'app' | 'character' | 'state'
 
 /** 卡片描述符：模型经 ui_* 工具声明 → 服务端 catalog 校验（唯一权威）→ SSE `card`
  *  事件推送 + TraceEntry 持久化 → 前端注册表懒加载渲染的统一载体。 */

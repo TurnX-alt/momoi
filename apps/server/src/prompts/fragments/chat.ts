@@ -12,6 +12,7 @@
 // ============================================================
 
 import type { PromptFragment } from '../types.js'
+import type { WorldStateDef, WorldStateValues } from '@momoi/shared/types'
 import { promptEngine } from '../instance.js'
 import { skillRegistry } from '../../skills/loader.js'
 import { resolveAgentPersona } from './core.js'
@@ -34,8 +35,9 @@ export interface ChatPromptContext {
   memoryEnabled?: boolean
   /** 跨会话用户记忆（时间正序，最近 30 条） */
   userMemories?: string[]
-  /** 世界模拟上下文：存在时注入「世界模拟」块（替代群组对话规则块的身份框架） */
-  world?: { laws: string }
+  /** 世界模拟上下文：存在时注入「世界模拟」块（替代群组对话规则块的身份框架）。
+   *  states / state_values 可选（缺省 = 无状态）：提示词预览归化只复制提供了的键。 */
+  world?: { laws: string; states?: WorldStateDef[]; state_values?: WorldStateValues }
   /** 是否群聊 */
   isGroup?: boolean
   /** QQ 群聊模式 —— 单 Agent 面对多真人 */

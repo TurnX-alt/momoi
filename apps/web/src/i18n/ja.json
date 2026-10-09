@@ -96,6 +96,8 @@
     "WORLD_AGENTS_REQUIRED": "少なくとも 1 つのエージェントが必要です",
     "WORLD_NOTHING_TO_UPDATE": "更新する内容がありません",
     "WORLD_NOT_FOUND": "世界が見つかりません",
+    "WORLD_STATES_INVALID": "状態定義が不正です：{{detail}}",
+    "WORLD_STATE_VALUE_INVALID": "状態値が不正です：{{detail}}",
     "MEMORY_AGENT_ID_REQUIRED": "agent_id が必要です",
     "MEMORY_CONTENT_EMPTY": "内容を入力してください",
     "MEMORY_CONTENT_TOO_LONG": "内容が長すぎます（上限 {{limit}} 文字）",

@@ -10,7 +10,7 @@ import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
 import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutral-agent.js'
 import { persistConversationStats } from '../lib/stats-store.js'
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
-import type { ServerMessage, Attachment, ConversationStats, TraceEntry } from '@momoi/shared/types'
+import type { ServerMessage, Attachment, ConversationStats, TraceEntry, WorldStateDef, WorldStateRuntime } from '@momoi/shared/types'
 import { randomUUID } from 'crypto'
 import { getConfig, listAgents, getAgent } from '../lib/config.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
@@ -25,6 +25,7 @@ import { broadcastStream, broadcastConversationSync, broadcastUnreadUpdate } fro
 import { countUnread } from '../lib/unread.js'
 import { trackUserActivity } from './user.js'
 import { resolveWorkspaceAnchor } from './workspaces.js'
+import { parseWorldRuntime, validateStates } from '../lib/world-state.js'
 
 export const chatRoute = new Hono()
 
@@ -102,8 +103,8 @@ chatRoute.post('/', async (c) => {
     throw new ApiError(ErrCode.UNAUTHORIZED)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string; workspace_id?: string | null; world_laws?: string }>()
-  const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id, workspace_id, world_laws } = body
+  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string; workspace_id?: string | null; world_laws?: string; world_states?: unknown }>()
+  const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id, workspace_id, world_laws, world_states } = body
   const requestedAgentId = body.agent_id
   // 本轮实际采用的 Agent：新建会话取请求 agent_id；已有单聊会话锚定到
   // conversations.agent_id（见下方归属校验分支）。
@@ -189,8 +190,19 @@ chatRoute.post('/', async (c) => {
       // 差异只有两处：成员以 DB 为准（worlds 侧表随会话创建），以及
       // 用户消息在系统提示里被框架为「来自世界的变动」而非用户发言。
       const isWorld = conversation_type === 'world'
-      /** 世界信息（法则）：isWorld 时由 DB 读出，传给编排器注入系统提示 */
-      let worldInfo: { laws: string } | undefined
+      /** 世界运行态（法则 + 状态定义 + 当前值）：isWorld 时由 DB 读出（或草稿构造），
+       *  传给编排器注入系统提示 / 驱动 update_state 工具与轮末结算 */
+      let worldInfo: WorldStateRuntime | undefined
+      // 草稿态状态定义先行校验（仅新建会话时生效）：失败即终止，避免创建出半成品世界
+      let draftWorldStates: WorldStateDef[] | undefined
+      if (isWorld && !conversation_id && world_states !== undefined) {
+        const statesCheck = validateStates(world_states)
+        if (!statesCheck.ok) {
+          send({ type: 'error', code: ErrCode.WORLD_STATES_INVALID, params: { detail: statesCheck.reason } })
+          return
+        }
+        draftWorldStates = statesCheck.value
+      }
       let groupAgentIds = ((isGroup || isWorld) && agent_ids && agent_ids.length > 0) ? agent_ids : []
 
       if (!convId) {
@@ -233,13 +245,16 @@ chatRoute.post('/', async (c) => {
         // World draft first message: create worlds side-table row + set worldInfo for orchestrator
         if (isWorld) {
           const laws = (world_laws ?? '').trim().slice(0, 2000)
+          const states = draftWorldStates ?? []
           await db.insert(worlds).values({
             conversation_id: convId,
             laws,
+            states: JSON.stringify(states),
+            state_values: JSON.stringify({}),
             created_at: now,
             updated_at: now,
           }).run()
-          worldInfo = { laws }
+          worldInfo = { laws, states, state_values: {} }
         }
       } else {
         // Verify conversation belongs to user
@@ -275,7 +290,8 @@ chatRoute.post('/', async (c) => {
             .orderBy(groupConversationAgents.sort_order)
             .all()
           groupAgentIds = memberRows.map((r: { agent_id: string }) => r.agent_id)
-          worldInfo = (await db.select().from(worlds).where(eq(worlds.conversation_id, convId)).get()) ?? undefined
+          const worldRow = await db.select().from(worlds).where(eq(worlds.conversation_id, convId)).get()
+          worldInfo = worldRow ? parseWorldRuntime(worldRow) : undefined
         }
       }
       if (isWorld && groupAgentIds.length === 0) {
