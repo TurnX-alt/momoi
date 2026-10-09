@@ -19,6 +19,8 @@
 | `apps/server/src/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
 | `apps/server/src/tools/group-mention-tool.ts` | @mention 工具：Agent 间点名调用 |
 | `apps/server/src/tools/ask-user-tool.ts` | ask_user 工具：阻塞式向用户提问并等待回答 |
+| `apps/server/src/tools/ui-cards/` | 生成式卡片工具（catalog 单源 + card-tool 工厂），见 `module-intelligent-ui.md` |
+| `apps/web/src/components/cards/` | 卡片组件注册表与实现（chart/stat/table/diagram） |
 | `apps/server/src/realtime.ts` | 进程内事件总线：同账号多设备实时同步 |
 | `apps/server/src/routes/events.ts` | 实时事件通道 `GET /api/events`（SSE 长连接） |
 | `packages/shared/src/thinking.ts` | thinking 分段的编解码 |
@@ -71,6 +73,7 @@
 | `tool_call` | `{ id?: string, name: string, input: object, agent_id?, agent_name? }` | LLM 发起工具调用（intent 阶段，尚未执行） |
 | `tool_execution_start` | `{ id?: string, name: string, input: object, agent_id?, agent_name? }` | 工具实际开始执行（`tool_call` 是 LLM intent，`tool_execution_start` 是运行时确认——分离后客户端可区分"声明要调"与"正在执行"两个阶段） |
 | `tool_result` | `{ id?: string, name: string, summary: string, artifacts?, agent_id?, agent_name? }` | 工具调用结果 |
+| `card` | `{ id?: string, card: CardDescriptor, agent_id?, agent_name? }` | 生成式卡片声明（`ui_*` 工具执行完成时发出，先于同次调用的 `tool_result`）——契约见 `module-intelligent-ui.md` |
 | `ask_user` | `{ question_id: string, tool_call_id: string, questions: AskUserQuestion[], agent_id?, agent_name? }` | Agent 调用 ask_user 工具向用户提问（暂停执行，等待用户回答） |
 | `agent_start` | `{ agent_id: string, agent_name: string }` | 群聊中某个 Agent 开始回复 |
 | `agent_done` | `{ agent_id: string, agent_name: string, reply: string, suggestions: string[] }` | 群聊中某个 Agent 回复完成 |
@@ -223,6 +226,7 @@ Voice 参数从 Agent 的 `voice_settings` JSON 中读取：`speakerId`（必选
 15. **ask_user 工具集成**：Agent 调用 ask_user 时，服务端通过 SSE 下发 `ask_user` 事件（含 questionId、questions 数据）；用户回答经 `POST /api/chat/:id/answer` 端点递交，`resolveQuestion()` 唤醒 Promise 并将回答作为工具结果回传 LLM；超时 120s 或 SSE 断开则 `rejectQuestion()`
 16. **实时中继广播**：`send()` 内每次写入 SSE 事件后（除 `conversation_id` 和 `user_message_id`），调用 `broadcastStream` 中继到同账号其他设备的 `/api/events` 连接，跳过源 `device_id`；`user_message` 在 `streamConvId` 确立后单独广播
 17. **状态条落库**：每轮生成后先下发 `stats` 事件，**随即**把同一份快照写入 `conversations.stats`（写失败只记日志，不影响本轮回复）——契约见〈会话状态条〉
+18. **生成式卡片**：`ui_*` 工具执行完成后捕获 `data.card` → 先发 `card` SSE 事件（先于 `tool_result`）并写入 trace 条目；卡片随 assistant 消息持久化（trace 列），契约见 `module-intelligent-ui.md`
 
 ### 服务端（pi-adapter.ts）
 

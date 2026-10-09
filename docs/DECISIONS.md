@@ -1409,3 +1409,45 @@
 - i18n 三语：4 个 `errors.*`、`configSummaryGateway`、`configPin*`；**改写** `configExportDesc` / `configExportSecretWarn`（原文写着「不包含网关密钥与 API Key」，已为假）
 - 测试：`config-transfer.test.ts` 48 项（导出白名单断言由「不含」翻转为「含」；**fake 的 `updateConfig` 必须联动 `externalHosting`**，否则顺序断言测不出东西）
 - 文档：`module-config.md`（导出范围/校验规则/接口契约/应用顺序/PIN 门控；顺带订正 `support_attachments`、`support_infinite_mode` 的默认值——代码是 `!== 'false'` 即默认 true，文档原写 false）、`module-admin.md`（面板小节已过期：写「6 个标签页」且含 `Branding`，更正为当前 8 个 tab 与实际顺序）
+
+---
+
+## D54：生成式卡片（Intelligent UI）——Chat Components 范式、每组件族一工具、trace 零迁移持久化
+
+**日期**：2026-10-09
+
+**背景**：OpenAI 2026-10 随 GPT-6 推出 "Intelligent UI"（模型在聊天流中直接渲染交互式界面）。Momoi 计划以此统一 mermaid 绘图、数据卡片、minigame 三类能力的交付底座，并补齐「用户与 AI 生成的 UI 交互后回流模型」能力。OpenUI 逆向显示 ChatGPT 的实现是专用声明格式（DIL = Markdown + JSX 风格标签 + 内嵌状态逻辑）+ 服务端周期性全量重编译 + `issueNewTurn` 回流——该路线以模型针对性训练为前提，且已知缺陷多（重发冗余、刷新丢状态、逻辑错误静默）。
+
+**决策**：
+1. 采用 **Chat Components 范式**：模型经 `ui_*` 工具调用声明卡片（组件名 + schema 约束的结构化 props），服务端权威校验，SSE 推送 + trace 持久化，前端注册表懒加载渲染
+2. **每组件族一个工具**（ui_chart / ui_stat / ui_table / ui_diagram，分期扩至 form / app / character），统一 `createCardTool(spec)` 工厂 + `catalog.ts` 单源（工具定义 / 提示词目录 / 文档三处同源）
+3. **捕获点唯一**：`tool_execution_end` 分支捕获 `details.data.card` → trace 条目 + SSE `card` 事件（先于同次 `tool_result`）；不用 onUpdate 通道（执行 <1ms 无挂起前推送需求，且与持久化点分离会成双源）
+4. **持久化零迁移**：复用 `messages.trace` JSON 列新增 `{ type: 'card' }` 条目变体——重放链路（conversations 解析 → mapServerMessage → groupAndRenderTrace）全部既存
+5. **交互回流（M2）**：card-action 以 ```` ```card-action ```` 围栏进 user 消息 content（D5 suggestions 先例），**不建新端点**——前端合成协议消息走既有 `POST /api/chat` 的 SSE 管道
+6. 前端注册表手写轻校验（**否决 zod**）；图表颜色由前端固定色板分配（模型不可指定），双模式过 dataviz 校验器
+
+**原因**：
+- **LLM 只能看到文本**——任何结构化 JSON 列在回喂时都要再序列化成文本注入，列只是冗余副本；围栏方案模型回喂天然可见、多设备中继免费、零迁移（决策 5 的决定性论据）
+- 交互回流的新一轮响应就是 `POST /api/chat` 的既有 SSE 流——专用端点要么把 650 行 streamSSE 抽出为共享函数（高风险重构），要么前端复制约百行流处理
+- typed schema 对弱模型的约束显著优于自由形状 props；每组件族一工具的独立描述可经 `tool/<name>` 片段单独覆盖
+- trace 列已存在；新列方案需 4 处迁移 + 回填 + 导出/中继适配，收益为零
+
+**备选与权衡**：
+- ❌ DIL 式专用格式：需模型针对性训练，与多模型 OpenAI 兼容平台定位冲突
+- ❌ 单一 `render_ui` 工具（component enum + 自由 props）：props 只能映射为自由对象，弱模型字段名幻觉率高；**协议层已按此兼容设计**——未来 ui 工具超 ~12 个时收敛为单工具，只换进料口
+- ❌ 新 JSON 列存交互事件：冗余且多处适配（见「原因」）
+- ❌ zod 前端校验：新依赖 + 与服务端 ToolSchemaProperty 双 schema 维护；唯一权威校验在服务端
+- ❌ recharts 系 manualChunks（vendor-chart）：Rolldown 会把强制块的**传递依赖闭包**（实测含 react / react-dom / clsx）吸入该块，导致入口静态预载整个图表块；交给默认拆分后 recharts 随卡片懒加载（~99KB gzip，仅首个图表卡拉取）
+- ⚠️ 回喂注入（M2）：模型现状连历史工具调用都不可见（saveAssistantMsg 不写 tool_calls 列）——卡片摘要注入是补齐 UI 状态感知而非泄漏，否则「把刚才的柱状图改成折线」类请求无法完成；每卡 ~15 token
+
+**附带修复**：`jsonSchemaToTypeBox` 忽略 `required` 参数——TypeBox 默认所有属性必填，多可选字段工具（如 ui_chart）必然校验失败且无法执行；现按声明包裹 `Type.Optional`（既有工具一并恢复声明语义）
+
+**影响**：
+- `packages/shared/src/types.ts`：CardComponent / CardDescriptor / CardActionPayload；TraceEntry card 变体；ServerMessage card 事件
+- `packages/shared/src/{constants,schema-validate}.ts`：CARD_ACTION_FENCE；ToolSchemaProperty 子集通用校验器（新导出入口 `@momoi/shared/schema-validate`）
+- `apps/server/src/tools/ui-cards/`：catalog 单源 + card-tool 工厂；registry 注册 4 个工具
+- `apps/server/src/ai/pi-adapter.ts`：tool_execution_end 捕获；TypeBox Optional 修复
+- `apps/server/src/prompts/fragments/chat.ts`：chat/ui-cards 片段（capabilities 层；golden 快照全量更新）
+- `apps/web/src/components/cards/`：注册表 + CardRenderer / CardFrame / CardErrorBoundary + chart/stat/table/diagram 四组件；MessageBubble trace 分支；useChat card case；globals.css 色板；useDarkMode
+- 测试：schema-validate / card-tool / card-sse 三个新测试文件（server 213 全绿）
+- 文档：`specs/module-intelligent-ui.md`（新，M1-M5 完整契约）、`module-chat.md`（SSE 表 + 行为约束 18）、ARCHITECTURE / PRD 增量

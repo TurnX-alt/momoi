@@ -220,6 +220,7 @@ type ServerMessage =
   | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }
   | { type: 'tool_execution_start'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }
   | { type: 'tool_result'; id?: string; name: string; summary: string; artifacts?: Array<{...}>; agent_id?: string; agent_name?: string }
+  | { type: 'card'; id?: string; card: CardDescriptor; agent_id?: string; agent_name?: string }
   | { type: 'agent_start'; agent_id: string; agent_name: string }
   | { type: 'agent_done'; agent_id: string; agent_name: string; reply: string; suggestions: string[] }
   | { type: 'group_start'; agent_ids: string[] }
