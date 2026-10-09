@@ -26,7 +26,8 @@ export interface CardRegistration {
  * （recharts）在组件模块内静态 import，随 lazy 边界自然独立成块。
  *
  * 分期：M1 = chart / stat / table / diagram；form（M2）、app（M4）、
- * character（M5）后续注册。缺失组件由 CardRenderer 渲染错误态。
+ * character（M5）后续注册；state（世界状态 · 引擎合成卡，无 ui_* 工具）
+ * 随世界模拟状态系统加入。缺失组件由 CardRenderer 渲染错误态。
  */
 export const cardRegistry: Partial<Record<CardComponent, CardRegistration>> = {
   chart: {
@@ -56,5 +57,9 @@ export const cardRegistry: Partial<Record<CardComponent, CardRegistration>> = {
   character: {
     title: 'character',
     Component: lazy(() => import('./character/CharacterCard').then((m) => ({ default: m.CharacterCard }))),
+  },
+  state: {
+    title: 'state',
+    Component: lazy(() => import('./state/StateCard').then((m) => ({ default: m.StateCard }))),
   },
 }

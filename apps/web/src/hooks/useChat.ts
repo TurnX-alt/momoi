@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, getUser, handleAuthOn401, getDeviceIdForRequest, subscribeRealtime, connectRealtime } from '../lib/api'
 import { errT } from '../i18n'
 import { errFromEnvelope, toApiError } from '../lib/apiError'
-import type { Conversation, ConversationStats, Workspace, Attachment, TraceEntry } from '@momoi/shared/types'
+import type { Conversation, ConversationStats, Workspace, Attachment, TraceEntry, WorldStateDef } from '@momoi/shared/types'
 import { THINKING_SEGMENT_OPEN } from '@momoi/shared/constants'
 
 interface ChatMessage {
@@ -198,6 +198,9 @@ export function useChat() {
   /** 世界草稿法则 ref：由 useGroupChat.createWorldDraft 写入，sendMessage 首条消息
    *  建会时作为 world_laws 字段携带。 */
   const worldLawsRef = useRef<string | null>(null)
+  /** 世界草稿状态定义 ref：由 useGroupChat.createWorldDraft 写入（空数组 = 清除），
+   *  sendMessage 首条消息建会时作为 world_states 字段携带。 */
+  const worldStatesRef = useRef<WorldStateDef[] | null>(null)
   /** 视图加载世代：mount 恢复 / hashchange / 主动切换共用，乱序响应按世代丢弃 */
   const loadGenRef = useRef(0)
   /** 本地流注册表（含 abort 与模式标记），key = 分区 key */
@@ -568,6 +571,8 @@ export function useChat() {
             agent_ids: groupMode && groupAgentIds ? groupAgentIds : undefined,
             // 世界法则：世界草稿首条消息建会时携带，服务端据此创建 worlds 侧表行
             world_laws: (groupMode && draftTypeRef.current === 'world') ? (worldLawsRef.current ?? undefined) : undefined,
+            // 世界状态定义：世界草稿首条消息建会时携带（默认无状态 = 空数组 = 不发送）
+            world_states: (groupMode && draftTypeRef.current === 'world') ? (worldStatesRef.current ?? undefined) : undefined,
             // 分组工作区：新会话首条消息建会时锁定输入框下拉选择的工作区（convId 已存在时服务端忽略）
             workspace_id: convId ? undefined : (newChatWorkspaceIdRef.current ?? undefined),
             infinite_mode: infiniteMode || undefined,
@@ -901,6 +906,11 @@ export function useChat() {
           next[idx] = { ...target, trace }
           return next
         })
+        // 状态卡（引擎合成）：无论气泡是否命中，都通知世界侧刷新 worldInfo 数据源
+        // （状态面板/编辑器读取；本地流与多设备中继事件共用本分支）
+        if (msg.card.component === 'state') {
+          window.dispatchEvent(new CustomEvent('realtime:world_state', { detail: { conversation_id: key } }))
+        }
         break
 
       case 'done':
@@ -1196,6 +1206,13 @@ export function useChat() {
     worldLawsRef.current = laws
   }, [])
 
+  /** 世界草稿状态定义写入：供 useGroupChat.createWorldDraft 存储定义到 ref
+   *  （每次覆写，空数组 = 清除），以便 sendMessage 首条消息建会时携带
+   *  world_states 字段。 */
+  const setWorldStates = useCallback((states: WorldStateDef[]) => {
+    worldStatesRef.current = states
+  }, [])
+
   /** 归档会话（服务端软删除：deleted_at 置位，从列表移除、自动解绑 IM，数据保留） */
   const archiveConversation = useCallback(async (id: string) => {
     try {
@@ -1406,6 +1423,7 @@ export function useChat() {
     startGroupDraft,
     startWorldDraft,
     setWorldLaws,
+    setWorldStates,
     /** 新会话的工作区选择（输入框下拉）：草稿建会（含草稿态上传附件提前建会，
      *  App.ensureConversation）时随请求锁定；已有会话不可移动 */
     newChatWorkspaceId,

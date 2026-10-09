@@ -10,7 +10,7 @@ import { api } from '../lib/api'
 import { useToast } from '../components/ui/toast'
 import { setCardActionHandler } from '../components/cards/cardInteractionStore'
 import { composeCardActionMessage } from '../lib/cardAction'
-import type { Conversation } from '@momoi/shared/types'
+import type { Conversation, WorldStateRuntime } from '@momoi/shared/types'
 interface AgentBrief {
   id: string
   name: string
@@ -43,8 +43,9 @@ export function useGroupChat() {
   /** 世界模拟模式：世界会话复用群聊管线（isGroupMode 同为 true），差异只在
    *  用户消息的语义框架（来自世界的变动）与展示样式（世界变动气泡） */
   const [isWorldMode, setIsWorldMode] = useState(false)
-  /** 当前世界法则：isWorldMode 时由 GET /api/worlds/:id 读出 */
-  const [worldInfo, setWorldInfo] = useState<{ laws: string } | null>(null)
+  /** 当前世界运行态（法则 + 状态定义 + 各成员当前值）：isWorldMode 时由
+   *  GET /api/worlds/:id 读出；状态卡事件 / 多设备同步触发就地刷新 */
+  const [worldInfo, setWorldInfo] = useState<WorldStateRuntime | null>(null)
   const [isQqGroup, setIsQqGroup] = useState(false)
   const [allAgents, setAllAgents] = useState<AgentBrief[]>([])
   // 群模式同步守卫：包装层刚同步过的会话不再重复请求；世代计数丢弃乱序响应
@@ -100,7 +101,7 @@ export function useGroupChat() {
           setIsQqGroup(false)
           api.getWorld(activeId).then((w) => {
             if (groupModeGenRef.current !== gen) return
-            setWorldInfo({ laws: w.world.laws })
+            setWorldInfo(w.world)
           }).catch(console.error)
         } else {
           setIsGroupMode(false)
@@ -150,7 +151,7 @@ export function useGroupChat() {
       setIsWorldMode(true)
       api.getWorld(id).then((w) => {
         setGroupAgents(w.agents)
-        setWorldInfo({ laws: w.world.laws })
+        setWorldInfo(w.world)
       }).catch(console.error)
     } else if (knownType === 'direct') {
       setIsGroupMode(false)
@@ -175,7 +176,7 @@ export function useGroupChat() {
       if (knownType !== 'world') {
         api.getWorld(id).then((w) => {
           setGroupAgents(w.agents)
-          setWorldInfo({ laws: w.world.laws })
+          setWorldInfo(w.world)
         }).catch(console.error)
       }
     } else {
@@ -214,7 +215,7 @@ export function useGroupChat() {
         .filter((a): a is AgentBrief => !!a)
       setGroupAgents(agentBriefs)
       setIsWorldMode(true)
-      setWorldInfo({ laws })
+      setWorldInfo({ laws, states: [], state_values: {} })
       // 法则写入 ref，供 sendMessage 首条消息建会时携带 world_laws 字段
       setWorldLaws(laws)
       // 进入世界草稿态：不落库，选好 Agent + 法则后即就位，首条消息发出时由服务端建会
@@ -335,6 +336,36 @@ export function useGroupChat() {
     return () => window.removeEventListener('realtime:group_members', onGroupMembers)
   }, [activeId, refreshGroupAgents])
 
+  /** 重拉当前世界运行态（状态卡事件 / 多设备同步 / 编辑保存后的数据源校准） */
+  const refreshWorldInfo = useCallback(async () => {
+    if (!activeId) return
+    try {
+      const res = await api.getWorld(activeId)
+      setWorldInfo(res.world)
+    } catch (err) {
+      console.error('Failed to refresh world info:', err)
+    }
+  }, [activeId])
+
+  // Realtime: 世界状态发生变更（状态卡事件——本地流与多设备中继共用；一个回合
+  // 内可能有多张状态卡）—— 若正在查看该世界，去抖后重拉一次
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const onWorldState = (e: Event) => {
+      const convId = (e as CustomEvent).detail?.conversation_id as string | undefined
+      if (!convId || activeId !== convId) return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        void refreshWorldInfo()
+      }, 600)
+    }
+    window.addEventListener('realtime:world_state', onWorldState)
+    return () => {
+      window.removeEventListener('realtime:world_state', onWorldState)
+      if (timer) clearTimeout(timer)
+    }
+  }, [activeId, refreshWorldInfo])
+
   // 世界法则保存：PATCH /api/worlds/:id —— 世界唯一的可变项。
   // 抛错由调用方（LawsEditor）展示；成功后就地更新 worldInfo，避免整轮重拉。
   const saveWorldLaws = useCallback(async (laws: string) => {
@@ -359,6 +390,7 @@ export function useGroupChat() {
     sendGroupMessage,
     forceComplianceRetryGroup,
     refreshGroupAgents,
+    refreshWorldInfo,
     saveWorldLaws,
   }
 }
