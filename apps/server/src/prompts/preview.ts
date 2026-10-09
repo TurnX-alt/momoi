@@ -55,7 +55,29 @@ function pickChatContext(input: Record<string, unknown>): Record<string, unknown
 
   const world = input.world
   if (world && typeof world === 'object' && typeof (world as { laws?: unknown }).laws === 'string') {
-    ctx.world = { laws: (world as { laws: string }).laws }
+    const src = world as { laws: string; states?: unknown; state_rows?: unknown }
+    // 只复制「提供了的键」：预览测试对 world 做严格相等断言，不得补空默认值
+    const picked: { laws: string; states?: unknown[]; state_rows?: unknown[] } = { laws: src.laws }
+    if (Array.isArray(src.states)) {
+      picked.states = src.states.filter(
+        (s) =>
+          s &&
+          typeof s === 'object' &&
+          typeof (s as { name?: unknown }).name === 'string' &&
+          typeof (s as { default?: unknown }).default === 'string',
+      )
+    }
+    if (Array.isArray(src.state_rows)) {
+      picked.state_rows = src.state_rows.filter(
+        (r) =>
+          r &&
+          typeof r === 'object' &&
+          typeof (r as { name?: unknown }).name === 'string' &&
+          !!(r as { values?: unknown }).values &&
+          typeof (r as { values?: unknown }).values === 'object',
+      )
+    }
+    ctx.world = picked
   }
   const speakingRole = asString(input.speakingRole)
   if (speakingRole === 'protagonist' || speakingRole === 'supporting') {

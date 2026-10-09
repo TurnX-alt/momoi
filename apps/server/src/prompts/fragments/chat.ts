@@ -12,7 +12,7 @@
 // ============================================================
 
 import type { PromptFragment } from '../types.js'
-import type { WorldStateDef, WorldStateValues } from '@momoi/shared/types'
+import type { WorldStateDef, WorldStateRow } from '@momoi/shared/types'
 import { promptEngine } from '../instance.js'
 import { skillRegistry } from '../../skills/loader.js'
 import { resolveAgentPersona } from './core.js'
@@ -36,8 +36,8 @@ export interface ChatPromptContext {
   /** 跨会话用户记忆（时间正序，最近 30 条） */
   userMemories?: string[]
   /** 世界模拟上下文：存在时注入「世界模拟」块（替代群组对话规则块的身份框架）。
-   *  states / state_values 可选（缺省 = 无状态）：提示词预览归化只复制提供了的键。 */
-  world?: { laws: string; states?: WorldStateDef[]; state_values?: WorldStateValues }
+   *  states / state_rows 可选（缺省 = 无状态）：提示词预览归化只复制提供了的键。 */
+  world?: { laws: string; states?: WorldStateDef[]; state_rows?: WorldStateRow[] }
   /** 是否群聊 */
   isGroup?: boolean
   /** QQ 群聊模式 —— 单 Agent 面对多真人 */
@@ -169,6 +169,39 @@ ${world.laws.trim() || '（暂无特别法则）'}
 - 被 @ 的存在会在本轮内优先回应，但其他存在仍然会照常行动，不会中断。
 - 不要 @ 你自己。
 ${ctx.mentionedBy ? `- 刚才 ${ctx.mentionedBy} @ 了你，在回应时请自然地接住对方的点名。` : ''}`
+    },
+  },
+  // 世界状态块：状态定义 + 全员当前值 + 行为规则。与 world-scene 分离为独立片段——
+  // 无状态的世界（默认）提示词逐字不变（黄金快照只增不改），管理端也可单独覆盖/停用。
+  {
+    id: 'chat/world-state',
+    targets: CHAT_SYSTEM_TARGET,
+    layer: 'scene',
+    priority: 29,
+    description: '世界状态块：属性定义 + 全员当前值表 + 行为规则（世界会话且已定义状态时注入）',
+    when: (ctx) => !!ctx.world?.states?.length,
+    render: (ctx) => {
+      const world = ctx.world!
+      const states = world.states ?? []
+      const rows = world.state_rows ?? []
+      const defLines = states
+        .map((s) => `- ${s.name}（初始值 ${s.default}）${s.description ? `：${s.description}` : ''}`)
+        .join('\n')
+      const valueLines = rows
+        .map((r) => `${r.name}：${states.map((s) => `${s.name} ${r.values?.[s.name] ?? s.default}`).join('；')}`)
+        .join('\n')
+      return `### 世界状态
+世界上每个存在都持续携带以下状态值 —— 它们与法则一样，是世界运转的客观事实：
+
+${defLines}
+
+当前值（你对所有人的状态一目了然）：
+${valueLines || '（暂无成员）'}
+
+关于状态：
+- 你的身体感受、行为与判断必须与你的当前状态一致（虚弱、发烧、受伤、疲惫……都会真实地影响你）。
+- 当剧情中确实发生了改变某人状态的事件（受伤、治愈、生病、休息、情绪冲击……），调用 update_state 工具更新——你自己和其他人的状态都可以更新。同一回合内的多处变化合并为一次调用；没有实际变化就不要调用。
+- 状态更新会自动渲染成一张状态卡展示给所有人；不要在回复文本里自行编写状态卡的内容或格式，也不要写任何「[已渲染卡片]」之类的标注行。`
     },
   },
   {

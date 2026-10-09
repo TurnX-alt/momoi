@@ -110,6 +110,21 @@ export interface WorldStateRuntime {
   state_values: WorldStateValues
 }
 
+/** 提示词侧世界状态行：成员按名字呈现（供「全员状态表」渲染）。 */
+export interface WorldStateRow {
+  name: string
+  values: Record<string, string>
+}
+
+/** 提示词侧世界运行态视图：法则 + 状态定义 + 按名字的状态行。
+ *  与 WorldStateRuntime（id 键控）区分——这是注入系统提示词的展示形态，
+ *  由编排器按 Agent 从运行态快照构造。 */
+export interface WorldStatePromptView {
+  laws: string
+  states: WorldStateDef[]
+  state_rows: WorldStateRow[]
+}
+
 /** 世界模拟的侧表信息（worlds 行）。世界模拟是纯文本群聊的变体：
  *  两个可变维度 —— 法则（每轮注入系统提示词）与状态（定义 + 各成员当前值）。 */
 export interface WorldInfo extends WorldStateRuntime {

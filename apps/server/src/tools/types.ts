@@ -5,6 +5,7 @@
 import type { ToolDefinition } from '@momoi/shared/types'
 import type { SandboxFS } from './workspace.js'
 import type { MentionSignal } from './group-mention-tool.js'
+import type { WorldStateContext } from '../lib/world-state.js'
 
 /** Pi Agent Core 的进度回调类型（避免直接依赖 pi-agent-core） */
 export type ToolUpdateCallback = (partialResult: { content?: Array<{ type: string; text?: string }>; details?: unknown }) => void
@@ -17,6 +18,9 @@ export interface ToolContext {
   signal?: AbortSignal
   /** Group chat: @mention signal shared between orchestrator and at_mention tool */
   mentionSignal?: MentionSignal
+  /** 世界模拟：update_state 工具的状态句柄（仅世界会话且已定义状态时注入；
+   *  句柄含定义/当前值/成员，落库实现见 lib/world-state.ts 的 applyChanges） */
+  worldState?: WorldStateContext
   /** Current tool call ID (assigned by Pi loop) */
   currentToolCallId?: string
   /** Pi Agent Core 的进度回调，用于 tool_execution_update 事件 */

@@ -4,11 +4,12 @@
 
 import { runPiAgentLoop, type RunPiAgentLoopResult } from './pi-adapter.js'
 import type { ChatMessage, ContentPart } from './provider.js'
-import type { ConversationStats, ServerMessage, Agent, TraceEntry, WorldStateRuntime } from '@momoi/shared/types'
+import type { ConversationStats, ServerMessage, Agent, TraceEntry, WorldStateRuntime, WorldStatePromptView } from '@momoi/shared/types'
 import { ApiError } from '../lib/apiError.js'
 import type { ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
 import { getAgent, getConfig } from '../lib/config.js'
+import { loadWorldState, type WorldStateContext } from '../lib/world-state.js'
 import { decideGroupSpeakerOrder, type SpeakerOrder } from './neutral-agent.js'
 import { NEUTRAL_AGENT_ID } from '@momoi/shared/constants'
 
@@ -349,6 +350,24 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
 
       // 跨会话记忆的加载已下沉进 runPiAgentLoop（与本 Agent 的执行身份一致）
 
+      // 世界会话：每 Agent 重取运行态快照 —— 同一轮内后续 Agent 必须看到前序
+      // update_state 的改动（状态是共享的世界事实）；未定义状态时不注入工具。
+      let worldPrompt: WorldStatePromptView | undefined
+      let worldStateCtx: WorldStateContext | undefined
+      if (options.world) {
+        const stateCtx = await loadWorldState(conversationId)
+        if (stateCtx) {
+          worldPrompt = {
+            laws: stateCtx.laws,
+            states: stateCtx.defs,
+            state_rows: stateCtx.members.map((m) => ({ name: m.name, values: stateCtx.view[m.id] ?? {} })),
+          }
+          if (stateCtx.defs.length > 0) worldStateCtx = stateCtx
+        } else {
+          worldPrompt = { laws: options.world.laws, states: options.world.states, state_rows: [] }
+        }
+      }
+
       const { reply, suggestions, thinking, artifacts, trace, stats, genUsage } = await runPiAgentLoop({
         userMessage,
         history: perAgentHistory,
@@ -370,7 +389,8 @@ export async function orchestrateGroupChat(options: GroupOrchestratorOptions): P
         language,
         lastMessageAt,
         forceCompliance: options.forceCompliance === true,
-        world: options.world,
+        world: worldPrompt,
+        worldState: worldStateCtx,
       })
 
       runs.push({ reply, suggestions, thinking, artifacts, agentId, trace, stats, genUsage })

@@ -37,7 +37,7 @@ import type {
 import { Type } from '@sinclair/typebox'
 import type { TSchema } from '@sinclair/typebox'
 
-import type { AppConfig, Agent, CardDescriptor, ConversationStats, ServerMessage, ToolDefinition, TraceEntry, WorldStateRuntime } from '@momoi/shared/types'
+import type { AppConfig, Agent, CardDescriptor, ConversationStats, ServerMessage, ToolDefinition, TraceEntry, WorldStatePromptView } from '@momoi/shared/types'
 import { ErrCode } from '@momoi/shared/errors'
 import { ApiError } from '../lib/apiError.js'
 import {
@@ -56,6 +56,8 @@ import { getMcpTools, callMcpTool } from '../tools/mcp-client.js'
 import type { ToolContext, ToolResult, ToolArtifact } from '../tools/types.js'
 import type { MentionSignal } from '../tools/group-mention-tool.js'
 import { createMentionTool } from '../tools/group-mention-tool.js'
+import { createWorldStateTool } from '../tools/world-state-tool.js'
+import type { WorldStateContext } from '../lib/world-state.js'
 import { SandboxFS } from '../tools/workspace.js'
 import {
   buildChatSystemPrompt,
@@ -276,6 +278,42 @@ async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
       },
     }
     tools.push(mentionTool)
+  }
+
+  // 世界模拟：已定义状态时注入 update_state —— 世界内即时修改成员状态值
+  // （与 at_mention 同为动态工具；世界会话之外结构性不可见）
+  if (toolCtx.worldState) {
+    const stateToolModule = createWorldStateTool(toolCtx.worldState)
+    const stateSchema = jsonSchemaToTypeBox(
+      stateToolModule.definition.input_schema.properties || {},
+      stateToolModule.definition.input_schema.required || [],
+    )
+    const stateTool: AgentTool = {
+      name: stateToolModule.definition.name,
+      label: stateToolModule.definition.name,
+      description: stateToolModule.definition.description,
+      parameters: stateSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<any>> => {
+        const input = (params && typeof params === 'object' ? params : {}) as Record<string, unknown>
+        const ctx: ToolContext = { ...toolCtx, signal: signal || toolCtx.signal }
+        let result: ToolResult
+        try {
+          result = await stateToolModule.execute(input, ctx)
+        } catch (err) {
+          result = { summary: `Tool error: ${(err as Error).message}`, error: true }
+        }
+        const text = result.error ? `Error: ${result.summary}` : result.summary
+        return {
+          content: [{ type: 'text', text }],
+          details: { data: result.data, error: result.error },
+        }
+      },
+    }
+    tools.push(stateTool)
   }
 
   // 动态注入 MCP 工具（懒加载，首次或缓存过期时拉取）
@@ -965,8 +1003,11 @@ export interface RunPiAgentLoopOptions {
    *  在首次模型调用前即完成绕过，而非等空回复再搬迁。 */
   forceCompliance?: boolean
   /** 世界模拟上下文：存在时系统提示注入「世界模拟」块（替代群组对话规则块的身份框架）；
-   *  运行态全量（法则 + 状态定义 + 当前值），由编排器按 Agent 重取快照 */
-  world?: WorldStateRuntime
+   *  提示词视图（法则 + 状态定义 + 按名字的状态行），由编排器按 Agent 重取快照 */
+  world?: WorldStatePromptView
+  /** 世界状态工具句柄（仅世界会话且已定义状态时由编排器注入）：update_state 的
+   *  落库上下文，与每 Agent 重取的快照同源（lib/world-state.ts） */
+  worldState?: WorldStateContext
   /** 生成式卡片（ui_* 工具 + 卡片目录片段）开关：false = 结构性关闭（IM 渠道）。
    *  缺省 true（网页版）。三重门（工具 / 提示词 / 历史）见 D56 与
    *  docs/specs/module-intelligent-ui.md。 */
@@ -1005,7 +1046,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<RunPi
     mentionSignal, isGroup, infiniteMode,
     agentName, groupAgentNames, mentionedBy,
     speakingRole, protagonistName, language,
-    isQqGroup, lastMessageAt, world, uiCards,
+    isQqGroup, lastMessageAt, world, worldState, uiCards,
   } = opts
   const config = await getConfig()
 
@@ -1047,6 +1088,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<RunPi
     workspace: await SandboxFS.forConversation(convId),
     signal,
     mentionSignal,
+    worldState,
     agentId: resolvedAgentId,
     memoryDisabled: !memoryEnabled,
     uiCardsDisabled: uiCards === false,

@@ -292,6 +292,13 @@ export async function applyChanges(
     .set({ state_values: JSON.stringify(next), updated_at: Math.floor(Date.now() / 1000) })
     .where(eq(worlds.conversation_id, ctx.conversationId))
     .run()
+
+  // 就地刷新共享上下文：同一 Agent 循环内的连续调用、或调用方后续读取，
+  // 都会看到最新值（from 取值与写回基准不落旧快照）
+  ctx.stored = next
+  for (const ch of applied) {
+    if (ctx.view[ch.agentId]) ctx.view[ch.agentId][ch.attribute] = ch.to
+  }
   return { applied, card: buildStateChangeCard(applied, cardTitle) }
 }
 
