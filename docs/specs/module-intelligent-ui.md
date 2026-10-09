@@ -146,7 +146,7 @@ interface CardDescriptor {
 1. **捕获点唯一**：卡片仅在 `createEventEmitter` 的 `tool_execution_end` 分支捕获（`details.data.card`）——trace 与 SSE 同一处产出，避免双源漂移
 2. **事件顺序保证**：`card` 事件必定先于同 id 的 `tool_result` 到达客户端
 3. **校验权威在服务端**：前端轻校验只防崩；模型可见的错误经工具结果通道回传（不上 wire 错误码）
-4. **历史卡片感知**：回喂时经 `augmentRowsWithCards()`（`ai/history-cards.ts`）在含卡 assistant 行 content 尾部注入 `[已渲染卡片：{component}「{title}」 id:{id}]` 摘要（标题截 40 字符，不动存储；纯函数无 IO）——初始 history 构建与 reloadHistory 共用
+4. **历史卡片感知**：回喂时经 `augmentRowsWithCards()`（`ai/history-cards.ts`）在含卡 assistant 行 content 尾部注入 `[已渲染卡片：{component}「{title}」 id:{id}]` 摘要（标题截 40 字符，不动存储；纯函数无 IO）——初始 history 构建与 reloadHistory 共用；**防仿写**：标注格式只进回喂历史（DB 与显示端点均读原文），但模型可能复读该句式并据此"假装"已渲染卡片——提示词明令禁止模型自写该格式 + 前端渲染前剥除标注行（双保险；见 D59 影响注记）
 5. **IM 渠道结构性关闭**（D56）：wechat（单聊）与 qq（C2C / 群聊）的 runPiAgentLoop 均以 `uiCards: false` 运行——**三重门**：ui_* 工具不进工具表（`createToolAdapter` 经 `ToolContext.uiCardsDisabled` 剔除）、chat/ui-cards 片段不注入（上下文 `uiCards: []`）、历史不做卡片摘要注入（augment 不套用）。IM 触发卡片在结构上不可能；网页版（单聊/群聊/世界）不受影响
 
 ### 客户端

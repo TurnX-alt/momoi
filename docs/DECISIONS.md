@@ -1615,3 +1615,7 @@
 - `apps/server/src/tools/ui-cards/catalog.ts`：acts schema + 编排校验；golden 重生成
 - `apps/web/src/components/cards/character/gestures.ts`（新：手势库 + 时间轴引擎）；CharacterCard 表演层 + rotateVRM0 修正
 - 测试：ui_character +6 用例（手势编排 / 姿态 / 非法手势名 / 缺件分层 / times 误用 / 未知骨骼），server 263 全绿
+
+**实装后修正（2026-10-09，同批）**：
+- **标注行仿写**：M2 的历史注入格式 `[已渲染卡片：…]` 被模型在回复中复读（往历史注入格式=教会了句式；与 suggestions 围栏被自发输出同源）——模型写标注 ≠ 调工具，表现为"卡片概率性不渲染 + 文本污染"。修复双保险：`chat/ui-cards` 片段明令禁止自写该格式（golden 重生成）+ `MessageContent` 渲染前剥除标注行（助手消息，含流式未闭合残行与全角变体；对已落库消息同样生效）
+- **3D 卡加固**：清理补 `forceContextLoss()`（确定性释放 WebGL 上下文，防多卡累积触发浏览器上限后旧卡变空白）；模型/动画加载加 20s 超时（网络挂起给出可行动的错误而非永久 spinner，错误含 `chat.card3dTimeout` 指引）
