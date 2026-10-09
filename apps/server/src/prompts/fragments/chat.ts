@@ -15,6 +15,7 @@ import type { PromptFragment } from '../types.js'
 import { promptEngine } from '../instance.js'
 import { skillRegistry } from '../../skills/loader.js'
 import { resolveAgentPersona } from './core.js'
+import { cardCatalog } from '../../tools/ui-cards/catalog.js'
 
 export const CHAT_SYSTEM_TARGET = 'chat.system'
 
@@ -57,6 +58,8 @@ export interface ChatPromptContext {
   now?: number
   /** 可用技能；默认读取技能注册表（测试可注入空数组以隔离文件系统） */
   skills?: Array<{ name: string; description: string }>
+  /** 可用生成式卡片目录；默认读取卡片 catalog（测试可注入以隔离） */
+  uiCards?: Array<{ toolName: string; catalogLine: string }>
 }
 
 /** 组装主对话系统提示词（唯一入口 —— pi-adapter 与各调试入口共用） */
@@ -289,9 +292,28 @@ ${lastLine}`
       return `${header}\n\n${bullets}`
     },
   },
+  {
+    id: 'chat/ui-cards',
+    targets: CHAT_SYSTEM_TARGET,
+    layer: 'capabilities',
+    description: '可用生成式卡片目录块（组件名 + 用途，声明方式见各 ui_* 工具描述）',
+    when: (ctx) => (ctx.uiCards ?? snapshotCardCatalog()).length > 0,
+    render: (ctx) => {
+      const cards = ctx.uiCards ?? snapshotCardCatalog()
+      const header = `## 生成式卡片
+你可以在回复中渲染交互式卡片——比纯文本数字罗列或代码块更直观。需要时调用对应 ui_* 工具声明卡片，卡片会即时展示在用户面前，你随后继续正常回复即可。`
+      const bullets = cards.map((c) => `- **${c.toolName}**：${c.catalogLine}`).join('\n')
+      return `${header}\n\n${bullets}\n\n使用要点：调用工具后卡片自动渲染——不要用文字复述卡片里的数据，也不要向用户说明你调用了工具；一次回复可以声明多张卡片；能用一两句话讲清的数字不必制卡。`
+    },
+  },
 ]
 
 /** 技能清单快照：读取技能注册表并映射为 {name, description} */
 function snapshotSkills(): Array<{ name: string; description: string }> {
   return skillRegistry.getAll().map((s) => ({ name: s.manifest.name, description: s.manifest.description }))
+}
+
+/** 卡片目录快照：读取卡片 catalog 并映射为 {toolName, catalogLine} */
+function snapshotCardCatalog(): Array<{ toolName: string; catalogLine: string }> {
+  return cardCatalog.map((s) => ({ toolName: s.toolName, catalogLine: s.catalogLine }))
 }

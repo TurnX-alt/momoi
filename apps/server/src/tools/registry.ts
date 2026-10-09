@@ -9,6 +9,7 @@ import { skillTools } from './skill-tools.js'
 import { bashTool } from './bash-tool.js'
 import { askUserTool } from './ask-user-tool.js'
 import { memoryTool } from './memory-tool.js'
+import { cardTools } from './ui-cards/card-tool.js'
 import type { ToolModule } from './types.js'
 import type { ToolDefinition } from '@momoi/shared/types'
 
@@ -20,6 +21,7 @@ const allTools: ToolModule[] = [
   bashTool,
   askUserTool,
   memoryTool,
+  ...cardTools,
 ]
 
 /** Get all tool definitions for the LLM */

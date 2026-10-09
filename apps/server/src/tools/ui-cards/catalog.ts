@@ -1,0 +1,240 @@
+// ============================================================
+// UI 卡片目录 — 生成式卡片的单一事实来源（Single Source of Truth）
+// ============================================================
+// 一个 spec 同时驱动三处产物，保证永不漂移：
+//   1. 工具定义（ToolDefinition：名称 / 描述 / input_schema）——模型每轮可见
+//   2. chat/ui-cards 提示词片段（capabilities 层的组件目录 + 选卡指引）
+//   3. 文档（docs/specs/module-intelligent-ui.md 的组件表）
+//
+// 分期：M1 = chart / stat / table / diagram；form / app / character 后续追加。
+// 协议（CardDescriptor / SSE card 事件 / trace 持久化）见
+// docs/specs/module-intelligent-ui.md 与 DECISIONS.md D54。
+//
+// 注意：本模块刻意只依赖 @momoi/shared——被 prompts 片段静态引用，
+// 不得把 DB / 文档解析等重依赖拖进提示词引擎的依赖树。
+// ============================================================
+
+import type { CardComponent, ToolSchemaProperty } from '@momoi/shared/types'
+
+export interface CardComponentSpec {
+  /** 卡片组件名（shared CardComponent 联合） */
+  component: CardComponent
+  /** 暴露给模型的工具名（ui_*） */
+  toolName: string
+  /** 人类可读组件名（工具结果 summary 与文档用），如「图表」 */
+  label: string
+  /** chat/ui-cards 片段的一行目录条目（是什么 + 何时用） */
+  catalogLine: string
+  /** 工具描述正文（模型每轮可见）：职责 + 参数规则 + 限制 */
+  description: string
+  /** 工具参数 JSON Schema（ToolSchemaProperty 子集；title 为通用可选字段） */
+  propsSchema: Record<string, ToolSchemaProperty>
+  required: string[]
+  /** 组件特有语义校验（在通用 schema 校验之后执行）；返回 null = 通过，否则为面向模型自修复的原因描述 */
+  extraValidate?: (props: Record<string, unknown>) => string | null
+}
+
+/** 通用可选字段：卡片标题（CardFrame 渲染） */
+const titleProp: ToolSchemaProperty = {
+  type: 'string',
+  maxLength: 60,
+  description: '卡片标题（可选）',
+}
+
+// ---- 数据可视化：图表 ----
+
+const chartSeriesSchema: ToolSchemaProperty = {
+  type: 'object',
+  required: ['name', 'data'],
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 40, description: '系列名（图例显示）' },
+    data: {
+      type: 'array',
+      items: { type: 'number' },
+      minItems: 1,
+      maxItems: 60,
+      description: '数值序列（饼图 = 各扇区数值，应非负）',
+    },
+    stack: { type: 'string', maxLength: 20, description: '堆叠组名（可选；同名系列堆叠。仅柱状图）' },
+  },
+}
+
+function validateChartProps(props: Record<string, unknown>): string | null {
+  const errs: string[] = []
+  const type = props.type as string
+  const series = props.series as Array<{ data: number[] }>
+  const labels = props.labels as string[] | undefined
+
+  const lengths = new Set(series.map((s) => (Array.isArray(s?.data) ? s.data.length : -1)))
+  if (lengths.size > 1) {
+    errs.push(`series 各条 data 长度必须一致（当前分别为 ${[...lengths].join(' / ')}）`)
+  }
+  const len = lengths.size === 1 ? [...lengths][0] : -1
+  if (labels && len >= 0 && labels.length !== len) {
+    errs.push(`labels 长度（${labels.length}）必须与 series 的 data 长度（${len}）一致`)
+  }
+  if (type === 'pie') {
+    if (!labels) errs.push('饼图必须提供 labels（各扇区名）')
+    if (series.length !== 1) errs.push(`饼图只允许 1 条 series（当前 ${series.length} 条）`)
+    if (labels && labels.length > 5) {
+      errs.push(`饼图最多 5 个扇区（当前 ${labels.length} 个）——类目更多时请改用柱状图`)
+    }
+  }
+  if (props.stacked === true && type !== 'bar') errs.push('stacked 仅用于柱状图（type="bar"）')
+  if (props.horizontal === true && type !== 'bar') errs.push('horizontal 仅用于柱状图（type="bar"）')
+  return errs.length ? errs.join('；') : null
+}
+
+const chartSpec: CardComponentSpec = {
+  component: 'chart',
+  toolName: 'ui_chart',
+  label: '图表',
+  catalogLine: '图表卡片（折线/柱状/饼图）——趋势、对比、占比可视化',
+  description:
+    '渲染图表卡片：折线/柱状/饼图，用于趋势、对比、占比等数据可视化。' +
+    '颜色由前端自动分配，不要指定颜色。series 为数据系列（1-8 条），缺 labels 时折线/柱状按序号作类目；' +
+    '饼图：labels 必填（扇区名）、只允许 1 条 series、最多 5 类。stacked/horizontal 仅用于柱状图。' +
+    '数据过于明细时先聚合再制卡；一两个数字直接在正文说明即可，不必制卡。',
+  propsSchema: {
+    title: titleProp,
+    type: {
+      type: 'string',
+      enum: ['line', 'bar', 'pie'],
+      description: '图表类型：line=折线（趋势）、bar=柱状（对比）、pie=饼图（占比，最多 5 类）',
+    },
+    labels: {
+      type: 'array',
+      items: { type: 'string', maxLength: 40 },
+      maxItems: 60,
+      description: '类目轴标签（饼图 = 扇区名）。提供时长度必须与每条 series 的 data 一致',
+    },
+    series: {
+      type: 'array',
+      items: chartSeriesSchema,
+      minItems: 1,
+      maxItems: 8,
+      description: '数据系列（最多 8 条）',
+    },
+    unit: { type: 'string', maxLength: 10, description: '数值单位（可选），如 "%"、"万元"' },
+    stacked: { type: 'boolean', description: '堆叠柱状图（仅 type=bar 时有效）' },
+    horizontal: { type: 'boolean', description: '横向柱状图（仅 type=bar 时有效）' },
+  },
+  required: ['type', 'series'],
+  extraValidate: validateChartProps,
+}
+
+// ---- 数据可视化：统计卡 ----
+
+const statSpec: CardComponentSpec = {
+  component: 'stat',
+  toolName: 'ui_stat',
+  label: '统计卡',
+  catalogLine: '统计卡片（KPI 数值组，≤6 项）——一组要点数字的醒目呈现',
+  description:
+    '渲染统计卡片：一组关键数值的醒目呈现（KPI 数值组，1-6 项，每项含标签与数值，可选变化量）。' +
+    'value 为格式化后的展示字符串（如 "1,234"、"98.6%"、"12.5万"）——自行完成千分位/单位等格式化；' +
+    'delta 为数值变化量（正数=上升，负数=下降）。' +
+    '适用场景：多个要点数字需要醒目呈现时；单个数字直接在正文说明即可。',
+  propsSchema: {
+    title: titleProp,
+    items: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 6,
+      description: '统计项（1-6 个）',
+      items: {
+        type: 'object',
+        required: ['label', 'value'],
+        properties: {
+          label: { type: 'string', minLength: 1, maxLength: 30, description: '指标名' },
+          value: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 30,
+            description: '展示值（格式化字符串，如 "1,234"、"98.6%"）',
+          },
+          unit: { type: 'string', maxLength: 10, description: '单位（可选；若 value 已含单位可省略）' },
+          delta: { type: 'number', description: '变化量（可选；正数=上升，负数=下降）' },
+          deltaLabel: { type: 'string', maxLength: 20, description: '变化量说明（可选），如 "较上月"' },
+        },
+      },
+    },
+  },
+  required: ['items'],
+}
+
+// ---- 数据可视化：表格 ----
+
+function validateTableProps(props: Record<string, unknown>): string | null {
+  const columns = props.columns as string[]
+  const rows = props.rows as string[][]
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].length !== columns.length) {
+      return `第 ${i + 1} 行有 ${rows[i].length} 个单元格，但 columns 有 ${columns.length} 列——每行单元格数必须等于列数`
+    }
+  }
+  return null
+}
+
+const tableSpec: CardComponentSpec = {
+  component: 'table',
+  toolName: 'ui_table',
+  label: '表格',
+  catalogLine: '表格卡片——多字段明细、对比清单',
+  description:
+    '渲染表格卡片：结构化清单（多字段明细、对比清单，最多 12 列 × 200 行）。' +
+    'columns 为列名，rows 为数据行——每行的单元格数必须等于列数；单元格为字符串' +
+    '（纯数字列前端会自动右对齐）。行数很多时考虑只展示摘要与代表性数据。',
+  propsSchema: {
+    title: titleProp,
+    columns: {
+      type: 'array',
+      items: { type: 'string', minLength: 1, maxLength: 40 },
+      minItems: 1,
+      maxItems: 12,
+      description: '列名（1-12 列）',
+    },
+    rows: {
+      type: 'array',
+      maxItems: 200,
+      description: '数据行（最多 200 行；每行单元格数须等于列数）',
+      items: {
+        type: 'array',
+        items: { type: 'string', maxLength: 200 },
+        maxItems: 12,
+        description: '单行',
+      },
+    },
+    dense: { type: 'boolean', description: '紧凑行距（可选，适合行数较多时）' },
+  },
+  required: ['columns', 'rows'],
+  extraValidate: validateTableProps,
+}
+
+// ---- 图示：Mermaid ----
+
+const diagramSpec: CardComponentSpec = {
+  component: 'diagram',
+  toolName: 'ui_diagram',
+  label: 'Mermaid 图',
+  catalogLine: 'Mermaid 图示卡片——流程、时序、状态、甘特等结构图',
+  description:
+    '渲染 Mermaid 图示卡片：用 Mermaid DSL 渲染流程图、时序图、状态图、甘特图等结构化图示。' +
+    'code 为完整 Mermaid 源码（不含任何围栏标记）。' +
+    '优先使用 flowchart/graph、sequenceDiagram、stateDiagram-v2、gantt 等主流图型；过于小众的图型可能渲染失败。' +
+    '数据可视化（趋势/对比/占比）请改用 ui_chart。',
+  propsSchema: {
+    title: titleProp,
+    code: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 8000,
+      description: 'Mermaid 源码（不含 ```mermaid 围栏标记）',
+    },
+  },
+  required: ['code'],
+}
+
+// ---- 目录 ----
+
+export const cardCatalog: CardComponentSpec[] = [chartSpec, statSpec, tableSpec, diagramSpec]

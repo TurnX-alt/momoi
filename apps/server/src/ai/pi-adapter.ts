@@ -37,7 +37,7 @@ import type {
 import { Type } from '@sinclair/typebox'
 import type { TSchema } from '@sinclair/typebox'
 
-import type { AppConfig, Agent, ConversationStats, ServerMessage, ToolDefinition, TraceEntry } from '@momoi/shared/types'
+import type { AppConfig, Agent, CardDescriptor, ConversationStats, ServerMessage, ToolDefinition, TraceEntry } from '@momoi/shared/types'
 import { ErrCode } from '@momoi/shared/errors'
 import { ApiError } from '../lib/apiError.js'
 import {
@@ -168,7 +168,12 @@ function schemaPropertyToTypeBox(prop: import('@momoi/shared/types').ToolSchemaP
 function jsonSchemaToTypeBox(properties: Record<string, import('@momoi/shared/types').ToolSchemaProperty>, required: string[] = []): TSchema {
   const obj: Record<string, TSchema> = {}
   for (const [key, prop] of Object.entries(properties)) {
-    obj[key] = schemaPropertyToTypeBox(prop)
+    const s = schemaPropertyToTypeBox(prop)
+    // TypeBox 默认把所有属性标为必填——必须用 Type.Optional 包裹真正可选的属性，
+    // 否则 Pi 的参数校验会强制模型提供每一个字段（required 参数此前被忽略，
+    // 全部字段实际都成了必填）。可选属性众多时（如 ui_* 卡片工具）模型会必然
+    // 触发校验失败且工具无法执行。
+    obj[key] = required.includes(key) ? s : Type.Optional(s)
   }
   return Type.Object(obj)
 }
@@ -689,6 +694,15 @@ function createEventEmitter(state: SSEState, conversationId: string): (event: Ag
           mimeType: a.mimeType,
           downloadUrl: a.downloadUrl,
         }))
+
+        // 卡片声明捕获（ui_* 工具经 details.data.card 携带 CardDescriptor）：
+        // 先推 card 事件（前端即时渲染）再推 tool_result；同时写入 trace
+        // （紧随对应 tool_call 条目，id = 工具调用 id）供持久化与历史重放。
+        const card = (result?.details as { data?: { card?: CardDescriptor } } | undefined)?.data?.card
+        if (card) {
+          state.trace.push({ type: 'card', id: event.toolCallId, card })
+          state.send({ type: 'card', id: event.toolCallId, card })
+        }
 
         state.send({
           type: 'tool_result',

@@ -1,4 +1,8 @@
 export const SUGGESTIONS_FENCE = '```suggestions'
+// 卡片交互协议围栏：用户与卡片交互时，前端合成的用户消息 content 内嵌
+// `card-action` 围栏 JSON（CardActionPayload）。模型回喂天然可见；
+// 前端渲染为紧凑交互 chip 而非代码块。见 docs/specs/module-intelligent-ui.md。
+export const CARD_ACTION_FENCE = '```card-action'
 // 多轮思考链的片段分隔符：loop 在每一轮思考开始前插入，
 // DB 存含分隔符的纯文本，前端按此拆分展示多个「思考片段」。
 export const THINKING_SEGMENT_OPEN = '\n\n〔思考片段 '

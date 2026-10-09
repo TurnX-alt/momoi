@@ -126,6 +126,22 @@ describe('快照的结构性断言（防归一化掩盖回归）', () => {
     expect(text).toContain('- **alpha**: 第一个技能\n- **beta**: 第二个技能')
   })
 
+  it('生成式卡片目录为逐行 bullet（可注入隔离）', () => {
+    const text = buildFor('chat.system', {
+      agentSystemPrompt: 'A',
+      thinkingMode: true,
+      skills: [],
+      uiCards: [
+        { toolName: 'ui_chart', catalogLine: '图表卡片（折线/柱状/饼图）——趋势、对比、占比可视化' },
+        { toolName: 'ui_stat', catalogLine: '统计卡片（KPI 数值组，≤6 项）——一组要点数字的醒目呈现' },
+      ],
+    })
+    expect(text).toContain('## 生成式卡片')
+    expect(text).toContain(
+      '- **ui_chart**：图表卡片（折线/柱状/饼图）——趋势、对比、占比可视化\n- **ui_stat**：统计卡片（KPI 数值组，≤6 项）——一组要点数字的醒目呈现',
+    )
+  })
+
   it('空产出的片段不会留下空行空洞', () => {
     const text = buildFor('chat.system', { agentSystemPrompt: 'A', thinkingMode: true, skills: [] })
     expect(text).not.toMatch(/\n{3,}/)

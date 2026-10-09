@@ -116,10 +116,42 @@ export interface ToolCall {
   result?: unknown
 }
 
+// ---- Intelligent UI Cards（生成式卡片）----
+
+/** 卡片组件名——v1 全集一次定死（trace/SSE 历史数据稳定），前端注册表分期充实。
+ *  协议与实施见 docs/specs/module-intelligent-ui.md。 */
+export type CardComponent = 'chart' | 'stat' | 'table' | 'diagram' | 'form' | 'app' | 'character'
+
+/** 卡片描述符：模型经 ui_* 工具声明 → 服务端 catalog 校验（唯一权威）→ SSE `card`
+ *  事件推送 + TraceEntry 持久化 → 前端注册表懒加载渲染的统一载体。 */
+export interface CardDescriptor {
+  component: CardComponent
+  /** 卡片标题（可选；CardFrame 渲染） */
+  title?: string
+  /** 组件 props——shape 由服务端 catalog 按 component 校验；前端按组件本地类型消费 */
+  props: Record<string, unknown>
+}
+
+/** card-action 协议块：用户与卡片交互时，前端合成的用户消息 content 内
+ *  `CARD_ACTION_FENCE`（shared/constants）围栏中的 JSON——模型回喂天然可见，
+ *  前端渲染为紧凑交互 chip（D5 suggestions 围栏先例）。 */
+export interface CardActionPayload {
+  v: 1
+  /** 对位 TraceEntry card 变体的 id（= 声明该卡片的工具调用 id） */
+  card_id: string
+  component: CardComponent
+  /** 组件自定义动作名：'submit' | 'click' | ... */
+  action: string
+  /** 人类可读动作描述（按钮文案等），供摘要行与模型理解 */
+  label?: string
+  /** 表单值 / 选中项等动作负载 */
+  payload?: Record<string, unknown>
+}
+
 // ---- Trace（时间线渲染）----
 
-/** Agent 处理链路的时间线条目：按实际发生顺序排列思考、文本输出与工具调用。
- *  前端流式接收 SSE 事件时逐条追加；历史消息从 thinkingSegments + toolCalls 重建。 */
+/** Agent 处理链路的时间线条目：按实际发生顺序排列思考、文本输出、工具调用与卡片。
+ *  前端流式接收 SSE 事件时逐条追加；历史消息从 trace 列整体重建。 */
 export type TraceEntry =
   | { type: 'thinking'; text: string }
   | { type: 'text'; text: string }
@@ -132,6 +164,8 @@ export type TraceEntry =
       result?: string
       artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }>
     }
+  // 卡片：声明位置紧跟对应 ui_* 工具调用条目之后（id = 工具调用 id，card_action 对位用）
+  | { type: 'card'; id?: string; card: CardDescriptor }
 
 // ---- Config ----
 
@@ -374,6 +408,9 @@ export type ServerMessage =
   | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }
   | { type: 'tool_execution_start'; id?: string; name: string; input: Record<string, unknown>; agent_id?: string; agent_name?: string }
   | { type: 'tool_result'; id?: string; name: string; summary: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }>; agent_id?: string; agent_name?: string }
+  /** ui_* 卡片工具执行完成时发出——先于同一次工具调用的 tool_result。
+   *  与 TraceEntry card 变体同源（id = 工具调用 id）。 */
+  | { type: 'card'; id?: string; card: CardDescriptor; agent_id?: string; agent_name?: string }
   | { type: 'agent_start'; agent_id: string; agent_name: string }
   | { type: 'agent_done'; agent_id: string; agent_name: string; reply: string; suggestions: string[] }
   | { type: 'group_start'; agent_ids: string[] }
