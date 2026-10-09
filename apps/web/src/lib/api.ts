@@ -282,10 +282,11 @@ export const api = {
   removeGroupAgent: (convId: string, agentId: string) => request<{ success: boolean }>(`/api/group/${convId}/agents/${agentId}`, { method: 'DELETE' }),
 
   // World Simulation（世界模拟 —— 纯文本群聊的变体）
-  createWorld: (laws: string, agentIds: string[], workspaceId?: string | null) =>
-    request<{ conversation: import('@momoi/shared/types').Conversation; world: import('@momoi/shared/types').WorldInfo }>('/api/worlds', { method: 'POST', body: JSON.stringify({ laws, agent_ids: agentIds, workspace_id: workspaceId ?? null }) }),
+  createWorld: (laws: string, agentIds: string[], workspaceId?: string | null, states?: import('@momoi/shared/types').WorldStateDef[]) =>
+    request<{ conversation: import('@momoi/shared/types').Conversation; world: import('@momoi/shared/types').WorldInfo }>('/api/worlds', { method: 'POST', body: JSON.stringify({ laws, agent_ids: agentIds, workspace_id: workspaceId ?? null, states: states ?? [] }) }),
   getWorld: (convId: string) => request<{ world: import('@momoi/shared/types').WorldInfo; agents: Array<{ id: string; name: string; avatar: string }> }>(`/api/worlds/${convId}`),
-  updateWorldLaws: (convId: string, laws: string) => request<{ world: import('@momoi/shared/types').WorldInfo }>(`/api/worlds/${convId}`, { method: 'PATCH', body: JSON.stringify({ laws }) }),
+  updateWorld: (convId: string, patch: { laws?: string; states?: import('@momoi/shared/types').WorldStateDef[]; values?: import('@momoi/shared/types').WorldStateValues }) =>
+    request<{ world: import('@momoi/shared/types').WorldInfo }>(`/api/worlds/${convId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // Infinite Mode
   setInfiniteMode: (conversationId: string, enabled: boolean) => request<{ success: boolean; enabled: boolean }>('/api/chat/infinite-mode', { method: 'POST', body: JSON.stringify({ conversation_id: conversationId, enabled }) }),

@@ -10,11 +10,13 @@
 
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { WorldStateDef } from '@momoi/shared/types'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
 import { Loading } from '../ui/spinner'
 import { AgentPickerList, type AgentBrief } from './AgentPickerList'
+import { WorldStatesFields, normalizeStates } from './WorldStatesFields'
 import { errT } from '../../i18n'
 
 export type WorkflowMode = 'group' | 'world'
@@ -25,6 +27,7 @@ const LAWS_LIMIT = 2000
 
 export interface WorldDraft {
   laws: string
+  states: WorldStateDef[]
 }
 
 interface NewWorkflowDialogProps {
@@ -48,6 +51,7 @@ export function NewWorkflowDialog({
   const [mode, setMode] = useState<WorkflowMode>('group')
   const [selected, setSelected] = useState<string[]>([])
   const [laws, setLaws] = useState('')
+  const [states, setStates] = useState<WorldStateDef[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -55,6 +59,7 @@ export function NewWorkflowDialog({
     setMode('group')
     setSelected([])
     setLaws('')
+    setStates([])
     setSubmitting(false)
     setError('')
   }
@@ -85,7 +90,7 @@ export function NewWorkflowDialog({
       if (mode === 'group') {
         await onConfirmGroup(selected)
       } else {
-        await onConfirmWorld(selected, { laws: laws.trim() })
+        await onConfirmWorld(selected, { laws: laws.trim(), states: normalizeStates(states) })
       }
       reset()
       onOpenChange(false)
@@ -130,18 +135,25 @@ export function NewWorkflowDialog({
             </div>
 
             {mode === 'world' && (
-              <div className="space-y-2">
-                <div className="text-sm font-medium">{t('workflow.worldLaws')}</div>
-                <Textarea
-                  value={laws}
-                  onChange={(e) => setLaws(e.target.value)}
-                  rows={4}
-                  maxLength={LAWS_LIMIT}
-                  disabled={submitting}
-                  placeholder={t('workflow.lawsPlaceholder')}
-                />
-                <p className="text-xs text-muted-foreground leading-relaxed">{t('workflow.worldLawsHint')}</p>
-              </div>
+              <>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">{t('workflow.worldLaws')}</div>
+                  <Textarea
+                    value={laws}
+                    onChange={(e) => setLaws(e.target.value)}
+                    rows={4}
+                    maxLength={LAWS_LIMIT}
+                    disabled={submitting}
+                    placeholder={t('workflow.lawsPlaceholder')}
+                  />
+                  <p className="text-xs text-muted-foreground leading-relaxed">{t('workflow.worldLawsHint')}</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">{t('workflow.worldStates')}</div>
+                  <WorldStatesFields value={states} onChange={setStates} disabled={submitting} />
+                  <p className="text-xs text-muted-foreground leading-relaxed">{t('workflow.worldStatesHint')}</p>
+                </div>
+              </>
             )}
           </div>
         )}

@@ -447,14 +447,14 @@ export const Sidebar = React.memo(function Sidebar({ conversations, workspaces, 
             left: Math.max(8, menu.anchorRect.right - 160),
           }}
         >
-          {/* 世界：世界法则、世界成员 开头 */}
+          {/* 世界：编辑世界、世界成员 开头 */}
           {(conversations.find((c) => c.id === menu.convId))?.type === 'world' && onEditWorldLaws && (
             <button
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
               onClick={() => { onEditWorldLaws(menu.convId); closeMenu() }}
             >
               <Scale className="h-3.5 w-3.5" />
-              {t('workflow.editLaws')}
+              {t('workflow.editWorld')}
             </button>
           )}
           {(conversations.find((c) => c.id === menu.convId))?.type === 'world' && onManageWorldMembers && (

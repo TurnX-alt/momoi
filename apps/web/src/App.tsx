@@ -7,7 +7,7 @@ import { useDocsPanel } from './hooks/useDocsPanel'
 import { useMemoryPanel } from './hooks/useMemoryPanel'
 import { Sidebar } from './components/sidebar/Sidebar'
 import { NewWorkflowDialog, type WorldDraft } from './components/sidebar/NewWorkflowDialog'
-import { LawsEditor } from './components/sidebar/LawsEditor'
+import { LawsEditor, type WorldEditDraft } from './components/sidebar/LawsEditor'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { ChangeUsernameDialog } from './components/settings/ChangeUsernameDialog'
@@ -23,10 +23,16 @@ import { ConversationSearchDialog } from './components/sidebar/ConversationSearc
 import { PanelLeft, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api, getUser, clearSession, setSessionExpiry, getTokenExpiresAt } from './lib/api'
 import { ensureLocale, errT } from './i18n'
+import type { WorldStateDef, WorldStateValues } from '@momoi/shared/types'
 // 静态导入：模块零依赖且体积 ~1 KB，且 isPushSupported 每次渲染都要同步调用，
 // 模块本就在主包中——动态导入不产生任何分包收益（曾因此触发
 // INEFFECTIVE_DYNAMIC_IMPORT 警告），故统一走静态导入。
 import { isPushSupported, subscribePush, unsubscribePush } from './lib/push-subscription'
+
+// LawsEditor props 的稳定空值引用：身份参与 useEffect 依赖，不能每次渲染新建
+// （新建会让「编辑世界」对话框在打开状态下每次渲染都重置未保存的草稿）
+const EMPTY_WORLD_STATES: WorldStateDef[] = []
+const EMPTY_WORLD_VALUES: WorldStateValues = {}
 
 // First-use introduction — lazy chunk; users who dismissed it once never load it.
 const IntroductionDialog = lazy(() =>
@@ -160,7 +166,7 @@ export function App() {
     if (chat.draftType === 'world') {
       const agentIds = chat.groupAgents.map((a: { id: string }) => a.id)
       const laws = chat.worldInfo?.laws ?? ''
-      const { conversation } = await api.createWorld(laws, agentIds, wsId)
+      const { conversation } = await api.createWorld(laws, agentIds, wsId, chat.worldInfo?.states)
       await selectConversation(conversation.id)
       return conversation.id
     }
@@ -632,22 +638,22 @@ export function App() {
   }, [chat.selectConversation, isMobile])
   /** 世界模拟确认：对话框提交 → 进入草稿态（不落库），首条消息时服务端建会 */
   const handleConfirmWorld = useCallback(async (agentIds: string[], draft: WorldDraft) => {
-    await chat.createWorldDraft(draft.laws, agentIds)
+    await chat.createWorldDraft(draft.laws, agentIds, draft.states)
   }, [chat.createWorldDraft])
-  /** 世界法则编辑：顶栏法则按钮与 ChatPanel 法则入口共用（防内联箭头每渲染重建） */
+  /** 编辑世界打开：侧栏会话菜单「编辑世界」入口（防内联箭头每渲染重建） */
   const handleOpenLawsEditor = useCallback(() => setLawsEditorOpen(true), [])
-  /** 世界法则保存： LawsEditor 提交 → PATCH /api/worlds/:id */
-  const handleSaveLaws = useCallback(async (laws: string) => {
+  /** 世界编辑保存：LawsEditor 提交 → PATCH /api/worlds/:id（法则 / 状态定义 / 当前值） */
+  const handleSaveWorld = useCallback(async (draft: WorldEditDraft) => {
     setSavingLaws(true)
     try {
-      await chat.saveWorldLaws(laws)
+      await chat.saveWorld({ laws: draft.laws, states: draft.states, values: draft.values })
       toast({ title: t('workflow.saved'), variant: 'info' })
     } catch (err) {
-      toast({ title: t('workflow.lawsFailed', { error: errT(err) }), variant: 'info' })
+      toast({ title: t('workflow.saveFailed', { error: errT(err) }), variant: 'info' })
     } finally {
       setSavingLaws(false)
     }
-  }, [chat.saveWorldLaws, t, toast])
+  }, [chat.saveWorld, t, toast])
   const handleChangePin = useCallback(() => setChangePinOpen(true), [])
   const handleChangeUsername = useCallback(() => setChangeUsernameOpen(true), [])
   const handleLinkAccount = useCallback(() => setLinkedAccountsOpen(true), [])
@@ -867,13 +873,16 @@ export function App() {
         username={currentUser}
       />
 
-      {/* 世界法则编辑器：isWorldMode 时顶栏法则按钮打开 */}
+      {/* 「编辑世界」对话框：侧栏会话菜单打开（法则 / 状态定义 / 当前值手动修正） */}
       <LawsEditor
         open={lawsEditorOpen}
         onOpenChange={setLawsEditorOpen}
         laws={chat.worldInfo?.laws ?? ''}
+        states={chat.worldInfo?.states ?? EMPTY_WORLD_STATES}
+        values={chat.worldInfo?.state_values ?? EMPTY_WORLD_VALUES}
+        members={chat.groupAgents}
         saving={savingLaws}
-        onSave={handleSaveLaws}
+        onSave={handleSaveWorld}
       />
 
       {/* Change Username Dialog */}

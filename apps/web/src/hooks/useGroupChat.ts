@@ -10,7 +10,7 @@ import { api } from '../lib/api'
 import { useToast } from '../components/ui/toast'
 import { setCardActionHandler } from '../components/cards/cardInteractionStore'
 import { composeCardActionMessage } from '../lib/cardAction'
-import type { Conversation, WorldStateRuntime } from '@momoi/shared/types'
+import type { Conversation, WorldStateDef, WorldStateRuntime, WorldStateValues } from '@momoi/shared/types'
 interface AgentBrief {
   id: string
   name: string
@@ -33,6 +33,7 @@ export function useGroupChat() {
     startGroupDraft,
     startWorldDraft,
     setWorldLaws,
+    setWorldStates,
     refreshConversations,
     sendMessage,
     revertMessage,
@@ -207,17 +208,18 @@ export function useGroupChat() {
     }
   }, [allAgents, startGroupDraft])
 
-  // Create a new world simulation draft (laws + agents — record created on first message)
-  const createWorldDraft = useCallback(async (laws: string, agentIds: string[]) => {
+  // Create a new world simulation draft (laws + states + agents — record created on first message)
+  const createWorldDraft = useCallback(async (laws: string, agentIds: string[], states: WorldStateDef[]) => {
     try {
       const agentBriefs = agentIds
         .map((id) => allAgents.find((a) => a.id === id))
         .filter((a): a is AgentBrief => !!a)
       setGroupAgents(agentBriefs)
       setIsWorldMode(true)
-      setWorldInfo({ laws, states: [], state_values: {} })
-      // 法则写入 ref，供 sendMessage 首条消息建会时携带 world_laws 字段
+      setWorldInfo({ laws, states, state_values: {} })
+      // 法则与状态定义写入 ref，供 sendMessage 首条消息建会时携带（world_laws / world_states）
       setWorldLaws(laws)
+      setWorldStates(states)
       // 进入世界草稿态：不落库，选好 Agent + 法则后即就位，首条消息发出时由服务端建会
       startWorldDraft(null)
       return null
@@ -225,7 +227,7 @@ export function useGroupChat() {
       console.error('Failed to create world draft:', err)
       return null
     }
-  }, [allAgents, startWorldDraft, setWorldLaws])
+  }, [allAgents, startWorldDraft, setWorldLaws, setWorldStates])
 
   // Add an agent to the current group conversation
   const addAgentToGroup = useCallback(async (agentId: string) => {
@@ -366,14 +368,12 @@ export function useGroupChat() {
     }
   }, [activeId, refreshWorldInfo])
 
-  // 世界法则保存：PATCH /api/worlds/:id —— 世界唯一的可变项。
-  // 抛错由调用方（LawsEditor）展示；成功后就地更新 worldInfo，避免整轮重拉。
-  const saveWorldLaws = useCallback(async (laws: string) => {
+  // 世界编辑保存：PATCH /api/worlds/:id —— 法则 / 状态定义 / 状态当前值。
+  // 抛错由调用方（LawsEditor）展示；成功后就地更新 worldInfo（服务端返回对账视图）。
+  const saveWorld = useCallback(async (patch: { laws?: string; states?: WorldStateDef[]; values?: WorldStateValues }) => {
     if (!activeId) return
-    const res = await api.updateWorldLaws(activeId, laws)
-    if (res.world) {
-      setWorldInfo((prev) => (prev ? { ...prev, laws: res.world.laws } : prev))
-    }
+    const res = await api.updateWorld(activeId, patch)
+    if (res.world) setWorldInfo(res.world)
   }, [activeId])
 
   return {
@@ -391,6 +391,6 @@ export function useGroupChat() {
     forceComplianceRetryGroup,
     refreshGroupAgents,
     refreshWorldInfo,
-    saveWorldLaws,
+    saveWorld,
   }
 }
