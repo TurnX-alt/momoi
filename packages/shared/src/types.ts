@@ -146,6 +146,8 @@ export interface CardActionPayload {
   label?: string
   /** 表单值 / 选中项等动作负载 */
   payload?: Record<string, unknown>
+  /** 本地计算模式：卡片内算出的结果（随「发送给 AI」带回模型） */
+  result?: number
 }
 
 // ---- Trace（时间线渲染）----

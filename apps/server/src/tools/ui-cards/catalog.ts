@@ -15,6 +15,7 @@
 // ============================================================
 
 import type { CardComponent, ToolSchemaProperty } from '@momoi/shared/types'
+import { parseFormula } from '@momoi/shared/formula'
 
 export interface CardComponentSpec {
   /** 卡片组件名（shared CardComponent 联合） */
@@ -307,6 +308,36 @@ function validateFormProps(props: Record<string, unknown>): string | null {
       }
     }
   }
+
+  // 本地计算配置：声明期校验公式（语法 / 未知字段 / 未知表）——错误面向模型自修复
+  const compute = props.compute as Record<string, unknown> | undefined
+  if (compute) {
+    const parsed = parseFormula(String(compute.formula ?? ''))
+    if (!parsed.ok) {
+      errs.push(`compute.formula 语法错误：${parsed.error}`)
+    } else {
+      const tables = Array.isArray(compute.tables) ? (compute.tables as Array<{ name?: unknown }>) : []
+      const tableNames = new Set<string>()
+      for (const t of tables) {
+        const tn = String(t?.name ?? '')
+        if (tableNames.has(tn)) errs.push(`compute.tables 中表名 "${tn}" 重复`)
+        tableNames.add(tn)
+      }
+      const unknownFields = parsed.refs.fields.filter((f) => !names.has(f))
+      if (unknownFields.length) {
+        errs.push(
+          `compute.formula 引用了不存在的字段：${unknownFields.join('、')}（可用字段：${[...names].join('、')}）`,
+        )
+      }
+      const unknownTables = parsed.refs.tables.filter((t) => !tableNames.has(t))
+      if (unknownTables.length) {
+        errs.push(
+          `compute.formula 的 LOOKUP 引用了不存在的表：${unknownTables.join('、')}（可用表：${[...tableNames].join('、') || '无'}）`,
+        )
+      }
+    }
+  }
+
   return errs.length ? errs.join('；') : null
 }
 
@@ -314,12 +345,16 @@ const formSpec: CardComponentSpec = {
   component: 'form',
   toolName: 'ui_form',
   label: '表单',
-  catalogLine: '表单卡片（文本/数字/下拉/多选/滑块等字段）——向用户收集结构化输入，提交后内容自动回传',
+  catalogLine: '表单卡片——收集用户输入；可配 compute 公式在卡片内实时计算（如汇率换算），亦可提交回传',
   description:
     '渲染表单卡片：向用户收集若干字段（1-12 个），用户填写提交后，其内容会作为一条新消息回传给你继续处理。' +
     'name 是回传值的键（字母/下划线开头，须唯一）；字段类型 text/number/textarea 自由输入，' +
     'select/multiselect/button-group 必须提供 options（2-8 个），slider 可用 min/max/step，checkbox 为开关。' +
-    '何时用：需要用户输入多个参数、做选择题、确认配置时——表单能保证回传到结构化取值，优于在正文里列问题让用户自由回复。' +
+    '可选 compute 开启**本地实时计算**（无状态工具类卡片的正确形态：结果随输入在卡片内实时显示，不消耗对话轮次）——' +
+    'formula 以字段名作变量，支持 + - * / ^、括号、一元负号、ROUND(x, n)、LOOKUP(字段, 表名)；' +
+    '数据（汇率、换算系数等——尽量用最新值）经 tables 内联，LOOKUP 的键对应 select 字段的选项值；用户可随时把结果发送给你。' +
+    '典型："ROUND(amount * LOOKUP(pair, rate), 2)" 做汇率换算，另见单位换算、贷款月供。' +
+    '何时用：需要用户输入多个参数、做选择题、确认配置，或需要一张能直接算出结果的小工具时。' +
     '何时不用：只有一个简单问题用正文询问即可。',
   propsSchema: {
     title: titleProp,
@@ -332,6 +367,56 @@ const formSpec: CardComponentSpec = {
       description: '字段列表（1-12 个）',
     },
     submitLabel: { type: 'string', maxLength: 20, description: '提交按钮文案（可选，默认「提交」）' },
+    compute: {
+      type: 'object',
+      required: ['formula'],
+      description:
+        '本地实时计算配置（可选）——配置后结果随输入实时显示在卡片内（不消耗对话轮次），提交按钮变为「发送给 AI」',
+      properties: {
+        formula: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 300,
+          description:
+            '结果公式：字段名作变量，支持 + - * / ^、括号、一元负号、ROUND(x, n)、LOOKUP(字段, 表名)。' +
+            '示例："ROUND(amount * LOOKUP(pair, rate), 2)"',
+        },
+        tables: {
+          type: 'array',
+          maxItems: 4,
+          description: 'LOOKUP 数据表（可选）——如汇率表；键需与 select 字段的选项值一致',
+          items: {
+            type: 'object',
+            required: ['name', 'entries'],
+            properties: {
+              name: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 30,
+                pattern: '^[A-Za-z_][A-Za-z0-9_]*$',
+                description: '表名（公式中 LOOKUP 第二参数引用）',
+              },
+              entries: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 50,
+                description: '条目列表',
+                items: {
+                  type: 'object',
+                  required: ['key', 'value'],
+                  properties: {
+                    key: { type: 'string', minLength: 1, maxLength: 40, description: '键（与 select 选项的 value 对应）' },
+                    value: { type: 'number', description: '数值' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        resultLabel: { type: 'string', maxLength: 20, description: '结果行标签（可选，默认「计算结果」）' },
+        resultUnit: { type: 'string', maxLength: 10, description: '结果单位（可选），如 "元"' },
+      },
+    },
   },
   required: ['fields'],
   extraValidate: validateFormProps,

@@ -220,6 +220,68 @@ describe('ui_form', () => {
     expect(r.error).toBe(true)
     expect(r.summary).toContain('不匹配格式')
   })
+
+  it('compute 本地计算：合法公式与数据表产出描述符', async () => {
+    const r = await exec({
+      title: '汇率换算',
+      fields: [
+        { type: 'number', name: 'amount', label: '金额' },
+        { type: 'select', name: 'pair', label: '币种', options: [{ label: '美元→人民币', value: 'USD>CNY' }, { label: '欧元→人民币', value: 'EUR>CNY' }] },
+      ],
+      compute: {
+        formula: 'ROUND(amount * LOOKUP(pair, rate), 2)',
+        tables: [{ name: 'rate', entries: [{ key: 'USD>CNY', value: 7.21 }, { key: 'EUR>CNY', value: 7.85 }] }],
+        resultUnit: '元',
+      },
+    })
+    expect(r.error).toBeUndefined()
+    const card = cardOf(r.data)
+    expect(card.component).toBe('form')
+    expect((card.props as { compute: { formula: string } }).compute.formula).toContain('LOOKUP')
+  })
+
+  it('compute.formula 语法错误被拒绝', async () => {
+    const r = await exec({
+      fields: [{ type: 'number', name: 'a', label: 'A' }],
+      compute: { formula: 'a +' },
+    })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('语法错误')
+  })
+
+  it('compute.formula 引用未知字段被拒绝（含可用字段清单）', async () => {
+    const r = await exec({
+      fields: [{ type: 'number', name: 'a', label: 'A' }],
+      compute: { formula: 'a * b' },
+    })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('不存在的字段：b')
+    expect(r.summary).toContain('可用字段：a')
+  })
+
+  it('LOOKUP 引用未知表被拒绝', async () => {
+    const r = await exec({
+      fields: [{ type: 'select', name: 'k', label: 'K', options: [{ label: 'x' }, { label: 'y' }] }],
+      compute: { formula: 'LOOKUP(k, nope)' },
+    })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('不存在的表：nope')
+  })
+
+  it('compute.tables 表名重复被拒绝', async () => {
+    const r = await exec({
+      fields: [{ type: 'number', name: 'a', label: 'A' }],
+      compute: {
+        formula: 'a',
+        tables: [
+          { name: 't', entries: [{ key: 'x', value: 1 }] },
+          { name: 't', entries: [{ key: 'y', value: 2 }] },
+        ],
+      },
+    })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('"t" 重复')
+  })
 })
 
 describe('catalog 一致性', () => {
