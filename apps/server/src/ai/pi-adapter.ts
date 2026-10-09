@@ -184,7 +184,11 @@ async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
   // 上下文（QQ 群聊等多真人场景）一律剔除——它们的记忆永远不会被注入，允许调用只会写出
   // 死行或把别人的事记到绑定者名下（与 routes/memories.ts 对中立 Agent 返回 403 一致）。
   const memoryCapable = !!toolCtx.agentId && toolCtx.agentId !== NEUTRAL_AGENT_ID && !toolCtx.memoryDisabled
-  const defs = getAllTools().filter((d) => memoryCapable || d.name !== 'save_memory')
+  // 生成式卡片仅限网页版（D56）：IM 渠道结构性剔除全部 ui_* 工具——
+  // 与提示词片段关闭、历史不注入构成三重门
+  const defs = getAllTools()
+    .filter((d) => memoryCapable || d.name !== 'save_memory')
+    .filter((d) => !toolCtx.uiCardsDisabled || !d.name.startsWith('ui_'))
   const tools = defs.map((def) => {
     const toolModule = resolveTool(def.name)
     const schema = jsonSchemaToTypeBox(def.input_schema.properties || {}, def.input_schema.required || [])
@@ -962,6 +966,10 @@ export interface RunPiAgentLoopOptions {
   forceCompliance?: boolean
   /** 世界模拟上下文：存在时系统提示注入「世界模拟」块（替代群组对话规则块的身份框架） */
   world?: { laws: string }
+  /** 生成式卡片（ui_* 工具 + 卡片目录片段）开关：false = 结构性关闭（IM 渠道）。
+   *  缺省 true（网页版）。三重门（工具 / 提示词 / 历史）见 D56 与
+   *  docs/specs/module-intelligent-ui.md。 */
+  uiCards?: boolean
 }
 
 // ---- 入口函数 ----
@@ -996,7 +1004,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<RunPi
     mentionSignal, isGroup, infiniteMode,
     agentName, groupAgentNames, mentionedBy,
     speakingRole, protagonistName, language,
-    isQqGroup, lastMessageAt, world,
+    isQqGroup, lastMessageAt, world, uiCards,
   } = opts
   const config = await getConfig()
 
@@ -1029,7 +1037,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<RunPi
     : []
 
   // 1. 构建系统提示词（world 存在时注入「世界模拟」块，替代群组规则块的身份框架）
-  const systemPrompt = buildChatSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories, world })
+  const systemPrompt = buildChatSystemPrompt({ agentSystemPrompt, thinkingMode, isGroup, infiniteMode, agentName, groupAgentNames, mentionedBy, speakingRole, protagonistName, language, isQqGroup, lastMessageAt, memoryEnabled, userMemories, world, uiCards: uiCards === false ? [] : undefined })
 
   // 2. 构建工具上下文
   const toolCtx: ToolContext = {
@@ -1040,6 +1048,7 @@ export async function runPiAgentLoop(opts: RunPiAgentLoopOptions): Promise<RunPi
     mentionSignal,
     agentId: resolvedAgentId,
     memoryDisabled: !memoryEnabled,
+    uiCardsDisabled: uiCards === false,
   }
 
   // 3. 创建 Pi 工具

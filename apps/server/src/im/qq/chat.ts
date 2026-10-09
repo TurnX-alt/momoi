@@ -195,6 +195,8 @@ async function handleQqMessageInner(opts: QqChatOptions): Promise<void> {
     conversationId: convId,
     userId,
     agentId,
+    // 生成式卡片仅限网页版（D56）：IM 渠道结构性关闭
+    uiCards: false,
     lastMessageAt,
   })
 
@@ -469,6 +471,8 @@ async function handleQqGroupMessageInner(opts: QqGroupChatOptions): Promise<void
     agentId,
     isGroup: true,
     isQqGroup: true,
+    // 生成式卡片仅限网页版（D56）：IM 渠道结构性关闭
+    uiCards: false,
     lastMessageAt: lastGroupMessageAt,
   })
 

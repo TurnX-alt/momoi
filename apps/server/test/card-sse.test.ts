@@ -141,7 +141,7 @@ type ToolResultEvent = Extract<ServerMessage, { type: 'tool_result' }>
 type ToolCallEntry = Extract<TraceEntry, { type: 'tool_call' }>
 type CardEntry = Extract<TraceEntry, { type: 'card' }>
 
-async function run(): Promise<{ events: ServerMessage[]; result: Awaited<ReturnType<typeof runPiAgentLoop>> }> {
+async function run(extra?: { uiCards?: boolean }): Promise<{ events: ServerMessage[]; result: Awaited<ReturnType<typeof runPiAgentLoop>> }> {
   const events: ServerMessage[] = []
   const result = await runPiAgentLoop({
     userMessage: '画张图',
@@ -151,6 +151,7 @@ async function run(): Promise<{ events: ServerMessage[]; result: Awaited<ReturnT
     conversationId: 'card-test-conv',
     userId: 'card-test-user',
     agentId: h.AGENT.id,
+    ...extra,
   })
   return { events, result }
 }
@@ -278,5 +279,30 @@ describe('卡片捕获：trace 持久化', () => {
     const tc = result.trace.find((e) => e.type === 'tool_call' && e.id === 'call_ui_diagram') as ToolCallEntry
     expect(tc.status).toBe('error')
     expect(result.trace.some((e) => e.type === 'card')).toBe(false)
+  })
+})
+
+describe('IM 渠道闸门（D56：uiCards: false）', () => {
+  it('ui_* 工具被结构性剔除：模型即使调用也触发不了卡片', async () => {
+    vi.stubGlobal('fetch', scriptFetch([
+      toolRound('ui_chart', '{"type":"bar","series":[{"name":"A","data":[1]}]}'),
+      textRound('我用文字说明。'),
+    ]))
+    const { events, result } = await run({ uiCards: false })
+
+    // 工具不在工具表中 → 不可能产出卡片事件 / 卡片 trace 条目
+    expect(events.some((e) => e.type === 'card')).toBe(false)
+    expect(result.trace?.some((e) => e.type === 'card') ?? false).toBe(false)
+    // 轮次正常完成（文本回复送达），失败只发生在这一次工具调用上
+    expect(result.reply).toContain('文字')
+  })
+
+  it('缺省（网页版）行为不受影响：同一脚本触发卡片', async () => {
+    vi.stubGlobal('fetch', scriptFetch([
+      toolRound('ui_chart', '{"type":"bar","series":[{"name":"A","data":[1]}]}'),
+      textRound('图在这。'),
+    ]))
+    const { events } = await run()
+    expect(events.some((e) => e.type === 'card')).toBe(true)
   })
 })

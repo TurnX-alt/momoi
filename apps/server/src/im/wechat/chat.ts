@@ -136,6 +136,8 @@ async function handleWechatMessageInner(opts: WechatChatOptions): Promise<void> 
     userId,
     agentId,
     language,
+    // 生成式卡片仅限网页版（D56）：IM 渠道结构性关闭
+    uiCards: false,
     lastMessageAt,
   })
 

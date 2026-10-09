@@ -142,6 +142,12 @@ describe('快照的结构性断言（防归一化掩盖回归）', () => {
     )
   })
 
+  it('uiCards 为空数组时卡片目录块整体消失（IM 渠道闸门，D56）', () => {
+    const text = buildFor('chat.system', { agentSystemPrompt: 'A', thinkingMode: true, skills: [], uiCards: [] })
+    expect(text).not.toContain('## 生成式卡片')
+    expect(text).not.toContain('ui_chart')
+  })
+
   it('空产出的片段不会留下空行空洞', () => {
     const text = buildFor('chat.system', { agentSystemPrompt: 'A', thinkingMode: true, skills: [] })
     expect(text).not.toMatch(/\n{3,}/)

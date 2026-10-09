@@ -29,6 +29,12 @@ export interface ToolContext {
    * 工具执行层（memory-tool.ts）也会拒绝写入——不依赖"工具没被暴露"这一层假设。
    */
   memoryDisabled?: boolean
+  /**
+   * 本轮禁用生成式卡片（IM 渠道，D56）：createToolAdapter 据此剔除全部
+   * ui_* 工具；提示词片段与历史注入由 runPiAgentLoop 同源关闭——三重门
+   * 齐全，模型对卡片完全无感。
+   */
+  uiCardsDisabled?: boolean
 }
 
 /** Optional artifact: a file produced by a tool, surfaced to the user */
