@@ -6,7 +6,9 @@
 
 **与 markdown 输出的关系**：卡片是 markdown 的补充而非替代——能用一两句话讲清的内容不制卡（片段中有明确指引）；diagram 卡收编既有 mermaid 能力（DSL 原样保留，仅换进料通道，渲染器共享）。
 
-**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入，已实装）；M3 = IM 渠道 trace 补齐；M4 = 沙箱逃生舱（app）；M5 = 3D 角色卡（character）。分期细节见文末。
+**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入，已实装）；M3 = IM 渠道结构性关闭卡片（网页版专属，已实装，D56）；M4 = 沙箱逃生舱（app）；M5 = 3D 角色卡（character）。分期细节见文末。
+
+**渠道边界**：生成式卡片**仅限网页版**——IM 渠道（微信/QQ）以 `uiCards: false` 运行，模型对卡片完全无感（D56）。
 
 ## 涉及文件
 
@@ -33,6 +35,8 @@
 ## 接口契约
 
 ### ui_* 工具面（M1-M2：5 个）
+
+**仅网页版暴露**（D56）——IM 渠道以 `uiCards: false` 运行，ui_* 工具被结构性剔除、卡片目录片段不注入。
 
 每个组件族一个工具，全部由 `catalog.ts` 的 spec 生成（工具定义、提示词目录、文档同源，永不漂移）：
 
@@ -111,7 +115,7 @@ interface CardDescriptor {
 2. **事件顺序保证**：`card` 事件必定先于同 id 的 `tool_result` 到达客户端
 3. **校验权威在服务端**：前端轻校验只防崩；模型可见的错误经工具结果通道回传（不上 wire 错误码）
 4. **历史卡片感知**：回喂时经 `augmentRowsWithCards()`（`ai/history-cards.ts`）在含卡 assistant 行 content 尾部注入 `[已渲染卡片：{component}「{title}」 id:{id}]` 摘要（标题截 40 字符，不动存储；纯函数无 IO）——初始 history 构建与 reloadHistory 共用
-5. **IM 渠道（M3）**：wechat/qq 落库链路补齐 trace 字段后，IM 触发的卡片刷新不丢
+5. **IM 渠道结构性关闭**（D56）：wechat（单聊）与 qq（C2C / 群聊）的 runPiAgentLoop 均以 `uiCards: false` 运行——**三重门**：ui_* 工具不进工具表（`createToolAdapter` 经 `ToolContext.uiCardsDisabled` 剔除）、chat/ui-cards 片段不注入（上下文 `uiCards: []`）、历史不做卡片摘要注入（augment 不套用）。IM 触发卡片在结构上不可能；网页版（单聊/群聊/世界）不受影响
 
 ### 客户端
 
@@ -145,7 +149,7 @@ interface CardDescriptor {
 ### 分期验收（M2-M5）
 
 - **M2（已实装）**：模型出表单 → 填写提交 → 历史出现交互 chip → 新一轮正确引用表单值；「把刚才的柱状图改成折线」成功（历史注入生效）；双击提交只触发一轮；已消费卡片控件禁用；生成中提交被 toast 拦下且表单不被锁定；群聊卡片按钮 → @所属成员置首回应；compute 卡片输入即时出结果（零轮次）、「发送给 AI」把 result 带回模型、反复调参不锁定
-- **M3**：微信/QQ 触发画卡 → web 侧实时可见且刷新仍在；回退掉卡片所在消息后卡片随消息消失
+- **M3（已实装，D56 反转）**：IM 渠道（微信/QQ）对卡片完全无感——工具表无 ui_*、系统提示无卡片目录、历史无卡片摘要；卡片的渠道语义为「仅网页版」；网页版全量能力不受影响
 - **M4**：自包含 HTML 计数器可交互 + 自动高度；外部 fetch 被 CSP 阻断；>64KB 拒绝并自修复；主题切换正确；消息卸载 iframe 销毁
 - **M5**：VRM 模型加载 + idle 动画；切换 animation 生效；无 WebGL 优雅降级；three chunk 仅 3D 卡首次渲染拉取
 

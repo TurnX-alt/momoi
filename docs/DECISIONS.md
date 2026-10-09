@@ -1483,3 +1483,34 @@
 - `apps/server/src/tools/ui-cards/catalog.ts`：compute schema + 声明期校验 + 描述更新（golden 重生成）
 - `apps/web/src/components/cards/form/FormCard.tsx`（计算模式）；`cardInteractionStore` / `useGroupChat` / `CardActionChip`（result 透传）；i18n 三语 3 键
 - 测试：`formula.test.ts`（12 例）+ card-tool compute 5 例，server 242 全绿
+
+---
+
+## D56：生成式卡片仅限网页版——IM 渠道结构性关闭（工具 / 提示词 / 历史三重门）
+
+**日期**：2026-10-09
+
+**背景**：M3 原设计是「补齐 IM 渠道 trace 持久化，让 IM 触发的卡片刷新不丢」。产品决策反转：IM 渠道（微信 / QQ）**不开放**生成式卡片——卡片是网页版独享能力。IM 的载体（微信 / QQ 消息流）没有卡片渲染位，触发卡片对 IM 用户意味着「回复里少了一段内容」，只会制造困惑与无效的工具轮次。
+
+**决策**：
+1. **撤回 M3**（`git revert`）：微信 / QQ 链路恢复为不写 trace、不做卡片历史注入（回到卡片特性之前的语义）
+2. `RunPiAgentLoopOptions` 增加 `uiCards?: boolean`（缺省 true）——IM 渠道传 `false`，**三重门**同时生效：
+   - **工具**：`createToolAdapter` 剔除全部 `ui_*`（`ToolContext.uiCardsDisabled`，仿 `memoryDisabled` 模式）
+   - **提示词**：`chat/ui-cards` 片段不注入（上下文 `uiCards: []`）
+   - **历史**：`augmentRowsWithCards` 不套用（模型看不到历史卡片摘要）
+3. 网页版（单聊 / 群聊 / 世界）不受影响，全量能力保留
+
+**原因**：
+- **结构性关闭优于「触发但不显示」**：模型不知道卡片存在 → 不会承诺、不会调用、不会产生「看不到」的 UI；IM 用户始终拿到完整可读的文本回复
+- 三重门缺一不可：只关工具，模型仍会从目录 / 历史知道卡片并试图讨论；只关提示词，模型仍有工具可调
+- 闸门走既有 `memoryDisabled` 同款模式（ToolContext 标记 + adapter 过滤），验证成本最低
+
+**备选与权衡**：
+- ❌ 保留 M3（IM 触发、仅 web 端可看）：链路可行但产品上割裂——同一会话两个渠道能力不一致且用户难以理解
+- ❌ 保留 IM trace 持久化（web 透明性收益）：与「IM 不开放」的叙事冲突，且会把渠道差异搅浑（web 端渲染 IM 消息的思考 / 工具栈）；已随 M3 一并撤回
+- ⚠️ M1-M3 窗口期的 IM 会话可能已落库含卡 trace——保留不动：网页端渲染无碍，模型侧因三重门不再注入
+
+**影响**：
+- `git revert` M3 提交（820c4d1）；`ai/pi-adapter.ts`（选项 / 提示词上下文 / toolCtx / 工具过滤）、`tools/types.ts`（ToolContext）、`im/wechat/chat.ts` 与 `im/qq/chat.ts`（三处调用传 `uiCards: false`）
+- 测试：card-sse 增 IM 闸门双用例（关闭 → 无法触发；缺省 → 仍触发）；golden 增结构性断言（`uiCards: []` → 目录块消失）
+- 文档：module-intelligent-ui.md 的分期 / 工具面 / 行为约束 / 验收同步；`D55` 的 compute 能力同样仅网页版可用（受同一闸门约束）
