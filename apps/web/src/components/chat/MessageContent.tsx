@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react'
-import { useTranslation } from 'react-i18next'
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react'
+import { MermaidBlock } from './MermaidBlock'
 
 // Lazy-load the markdown renderer at the COMPONENT level: MarkdownView
 // statically imports react-markdown + remark-gfm, so the ~39 KB (gzip)
@@ -106,45 +106,4 @@ function sanitizeIncompleteMarkdown(text: string): string {
   result = result.replace(/\!?\[[^\]]*$/, '')
 
   return result
-}
-
-function MermaidBlock({ chart }: { chart: string }) {
-  const { t } = useTranslation()
-  const ref = useRef<HTMLDivElement>(null)
-  const [svg, setSvg] = useState<string>('')
-  const [error, setError] = useState<string>('')
-
-  useEffect(() => {
-    let cancelled = false
-
-    import('mermaid').then(async (m) => {
-      if (cancelled) return
-      try {
-        m.default.initialize({ startOnLoad: false, theme: 'default' })
-        const id = `mermaid-${Math.random().toString(36).slice(2, 9)}`
-        const { svg: rendered } = await m.default.render(id, chart)
-        if (!cancelled) setSvg(rendered)
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : t('chat.renderFailed'))
-      }
-    })
-
-    return () => { cancelled = true }
-  }, [chart, t])
-
-  if (error) {
-    return (
-      <pre className="text-xs text-destructive bg-muted p-2 rounded overflow-x-auto">
-        {chart}
-      </pre>
-    )
-  }
-
-  return (
-    <div
-      className="mermaid-container"
-      ref={ref}
-      dangerouslySetInnerHTML={{ __html: svg || t('common.loading') }}
-    />
-  )
 }

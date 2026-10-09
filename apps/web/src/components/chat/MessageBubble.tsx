@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
 import { AttachmentCard, AttachmentList } from './AttachmentCard'
+import { CardRenderer } from '../cards/CardRenderer'
 import { VoicePlayButton } from '../voice/VoicePlayButton'
 import { Bot, MoreHorizontal, Undo2, Check, X, ChevronRight } from 'lucide-react'
 import {
@@ -220,6 +221,12 @@ export const MessageBubble = React.memo(function MessageBubble({ message, onSugg
 /** Group consecutive tool_call entries into stacks; render trace with verbose-controlled thinking. */
 function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?: boolean): React.ReactNode {
   const elements: React.ReactNode[] = []
+  // 已被卡片事件「认领」的工具调用 id（ui_* 工具声明）：卡片即其 UI 表示，
+  // 对应 tool_call 条目不再进工具栈；校验失败（无卡片）时照常显示错误条目。
+  const claimed = new Set<string>()
+  for (const e of trace) {
+    if (e.type === 'card' && e.id) claimed.add(e.id)
+  }
   let i = 0
   while (i < trace.length) {
     const entry = trace[i]
@@ -228,15 +235,19 @@ function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?:
       // When thinking is hidden (EyeOff), merge tool-call groups that are
       // separated only by thinking blocks into a single collapsed stack to
       // avoid multiple "Used N tools" labels stacking without visible gaps.
-      const stack: TraceEntry[] = [entry]
+      const stack: TraceEntry[] = []
+      if (!(entry.id && claimed.has(entry.id))) stack.push(entry)
       let j = i + 1
       while (j < trace.length && (trace[j].type === 'tool_call' || (trace[j].type === 'thinking' && !verbose))) {
-        if (trace[j].type === 'tool_call') {
-          stack.push(trace[j])
+        const e = trace[j]
+        if (e.type === 'tool_call' && !(e.id && claimed.has(e.id))) {
+          stack.push(e)
         }
         j++
       }
-      elements.push(<ToolCallStack key={`stack-${i}`} entries={stack} streaming={streaming} />)
+      if (stack.length > 0) {
+        elements.push(<ToolCallStack key={`stack-${i}`} entries={stack} streaming={streaming} />)
+      }
       i = j
     } else if (entry.type === 'thinking') {
       elements.push(
@@ -248,6 +259,9 @@ function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?:
           verbose={verbose}
         />
       )
+      i++
+    } else if (entry.type === 'card') {
+      elements.push(<CardRenderer key={`card-${entry.id ?? i}`} card={entry.card} />)
       i++
     } else {
       // text

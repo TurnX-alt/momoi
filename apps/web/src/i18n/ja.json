@@ -184,6 +184,9 @@
       "submit": "送信",
       "placeholder": "回答を入力してください..."
     },
+    "cardRenderFailed": "カードの描画に失敗しました",
+    "cardTableEmpty": "データがありません",
+    "cardUnsupported": "未対応のカードタイプ：{{component}}",
     "completed": "完了",
     "connectionTimeout": "接続が切断されました。再試行してください",
     "downloadFailed": "添付ファイルのダウンロードに失敗しました: {{message}}",

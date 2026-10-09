@@ -880,6 +880,29 @@ export function useChat() {
         }
         break
 
+      // --- 生成式卡片（ui_* 工具声明，先于同一次工具调用的 tool_result 到达）---
+      // 从尾向前定位目标 assistant 气泡（群聊按 agent_id 归属匹配）；找不到则
+      // 丢弃——收尾 reconcile 会从 DB trace 完整重建。卡片描述符对象引用随事件
+      // 稳定，配合 CardRenderer 的 memo 避免流式期间的逐帧重渲染。
+      case 'card':
+        updateMessages(key, (prev) => {
+          let idx = -1
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const m = prev[i]
+            if (m.role !== 'assistant') continue
+            if (msg.agent_id && m.agent_id && m.agent_id !== msg.agent_id) continue
+            idx = i
+            break
+          }
+          if (idx === -1) return prev
+          const target = prev[idx]
+          const trace = [...(target.trace || []), { type: 'card' as const, id: msg.id, card: msg.card }]
+          const next = [...prev]
+          next[idx] = { ...target, trace }
+          return next
+        })
+        break
+
       case 'done':
         // 单聊对齐 group_done：收到 done 即结束 loading
         // （连接可能还要保持打开，等待中立 Agent 补发 suggestions）

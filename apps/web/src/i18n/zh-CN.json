@@ -184,6 +184,9 @@
       "submit": "提交",
       "placeholder": "输入你的回答..."
     },
+    "cardRenderFailed": "卡片渲染失败",
+    "cardTableEmpty": "暂无数据",
+    "cardUnsupported": "暂不支持的卡片类型：{{component}}",
     "completed": "完成",
     "connectionTimeout": "连接超时，请重试",
     "downloadFailed": "附件下载失败：{{message}}",

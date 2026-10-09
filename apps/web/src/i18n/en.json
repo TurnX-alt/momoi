@@ -184,6 +184,9 @@
       "submit": "Submit",
       "placeholder": "Type your answer..."
     },
+    "cardRenderFailed": "Card failed to render",
+    "cardTableEmpty": "No data",
+    "cardUnsupported": "Unsupported card type: {{component}}",
     "completed": "Completed",
     "connectionTimeout": "Connection lost, please retry",
     "downloadFailed": "Attachment download failed: {{message}}",

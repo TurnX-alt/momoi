@@ -89,6 +89,11 @@ export default defineConfig({
           if (id.includes('node_modules/i18next/') || id.includes('node_modules/react-i18next/')) {
             return 'vendor-i18n'
           }
+          // 图表库（recharts 系）刻意**不**做 manualChunks：
+          // Rolldown 会把被强制成块的模块的传递依赖闭包一并吸入该块
+          // （实测：react/react-dom/clsx 都会被拖进 vendor-chart，导致
+          // 入口静态预载整个图表块）。recharts 仅经卡片懒加载边界可达，
+          // 交给默认拆分策略即天然保持懒加载。
           // 其余 node_modules 交给 Rolldown 默认拆分策略
         },
       },
