@@ -460,6 +460,63 @@ const appSpec: CardComponentSpec = {
   extraValidate: validateAppProps,
 }
 
+// ---- 3D 角色（VRM）----
+
+function validateCharacterProps(props: Record<string, unknown>): string | null {
+  for (const k of ['model', 'animation'] as const) {
+    const v = props[k]
+    if (typeof v === 'string' && v.includes('..')) return `${k} 路径不合法（不得包含「..」）`
+  }
+  return null
+}
+
+const characterSpec: CardComponentSpec = {
+  component: 'character',
+  toolName: 'ui_character',
+  label: '3D 角色',
+  catalogLine: '3D 角色卡片（VRM）——虚拟角色模型 + 表情/动作动画，可配台词',
+  description:
+    '渲染 3D 角色卡片：加载 VRM 虚拟角色模型，展示表情与动作动画。' +
+    'model：用户提供的文件名（服务端 vrm 目录，如 "cinnamon.vrm"）或 https 直链；省略时用内置官方示例模型做演示。' +
+    'animation：.vrma 动作文件（文件名或直链，可选；缺省播放程序化呼吸 idle）。' +
+    'expression：表情名与权重（0-1）——名称依模型预设（常见 happy/angry/sad/relaxed/surprised/blink 等），未知名称自动忽略。' +
+    'caption：角色台词，显示在模型下方。' +
+    '何时用：用户想看某个角色的 3D 形象、需要展示动作或表情时。' +
+    '注意：不要编造不存在的模型文件名——用户未提供资产时可用默认示例模型，或先询问用户想展示谁。',
+  propsSchema: {
+    title: titleProp,
+    model: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 300,
+      description: 'VRM 模型：文件名（服务端 vrm 目录）或 https 直链；省略用内置官方示例模型',
+    },
+    animation: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 300,
+      description: '.vrma 动作文件：文件名或 https 直链（可选）',
+    },
+    expression: {
+      type: 'array',
+      maxItems: 6,
+      description: '表情（可选）：名称依模型预设，未知名称自动忽略',
+      items: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 30, description: '表情名，如 happy / surprised / blink' },
+          weight: { type: 'number', minimum: 0, maximum: 1, description: '权重 0-1（默认 1）' },
+        },
+      },
+    },
+    caption: { type: 'string', maxLength: 120, description: '角色台词/说明（可选，显示在模型下方）' },
+    height: { type: 'integer', minimum: 240, maximum: 640, description: '卡片高度 px（可选，默认 360）' },
+  },
+  required: [],
+  extraValidate: validateCharacterProps,
+}
+
 // ---- 目录 ----
 
-export const cardCatalog: CardComponentSpec[] = [chartSpec, statSpec, tableSpec, diagramSpec, formSpec, appSpec]
+export const cardCatalog: CardComponentSpec[] = [chartSpec, statSpec, tableSpec, diagramSpec, formSpec, appSpec, characterSpec]

@@ -330,6 +330,49 @@ describe('ui_app', () => {
   })
 })
 
+describe('ui_character', () => {
+  const exec = (input: Record<string, unknown>) => tool('ui_character').execute(input, ctx)
+
+  it('合法：模型 + 表情 + 台词产出描述符', async () => {
+    const r = await exec({
+      title: '肉桂',
+      model: 'cinnamon.vrm',
+      expression: [{ name: 'happy', weight: 0.8 }],
+      caption: '欢迎回来喵～',
+      height: 420,
+    })
+    expect(r.error).toBeUndefined()
+    const card = cardOf(r.data)
+    expect(card.component).toBe('character')
+    expect((card.props as { model: string }).model).toBe('cinnamon.vrm')
+    expect(r.summary).toContain('已渲染卡片：3D 角色「肉桂」')
+  })
+
+  it('空参数合法（全默认：内置示例模型）', async () => {
+    const r = await exec({})
+    expect(r.error).toBeUndefined()
+    expect(cardOf(r.data).component).toBe('character')
+  })
+
+  it('model 路径含 .. 被拒绝', async () => {
+    const r = await exec({ model: '../../secret.vrm' })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('不得包含')
+  })
+
+  it('expression 权重越界被拒绝（通用 schema 校验）', async () => {
+    const r = await exec({ expression: [{ name: 'happy', weight: 2 }] })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('不能大于 1')
+  })
+
+  it('expression 缺 name 被拒绝', async () => {
+    const r = await exec({ expression: [{ weight: 0.5 }] })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('expression[0].name: 必填字段缺失')
+  })
+})
+
 describe('catalog 一致性', () => {
   it('工具名与组件名一一对应且唯一', () => {
     const names = cardTools.map((t) => t.definition.name)
