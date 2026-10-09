@@ -1451,3 +1451,35 @@
 - `apps/web/src/components/cards/`：注册表 + CardRenderer / CardFrame / CardErrorBoundary + chart/stat/table/diagram 四组件；MessageBubble trace 分支；useChat card case；globals.css 色板；useDarkMode
 - 测试：schema-validate / card-tool / card-sse 三个新测试文件（server 213 全绿）
 - 文档：`specs/module-intelligent-ui.md`（新，M1-M5 完整契约）、`module-chat.md`（SSE 表 + 行为约束 18）、ARCHITECTURE / PRD 增量
+
+---
+
+## D55：表单卡本地实时计算——受限公式 DSL（parse/eval 同源）、无 eval、本地交互不回传
+
+**日期**：2026-10-09
+
+**背景**：M2 交互闭环将一切表单提交都回传给模型。但「无状态工具」类卡片（汇率换算、单位换算、贷款月供等）的本质是**确定性小工具**：模型在声明期提供数据（汇率/系数）与公式，用户交互在卡片内即可算出结果——回传模型既慢（一个完整 LLM 往返）又贵（消耗轮次），且与 ChatGPT Intelligent UI 的既有事实相悖（其本地交互完全不离开响应，只有显式新回合动作才回流）。
+
+**决策**：
+1. `ui_form` 增加可选 `compute` 配置：`{ formula, tables?, resultLabel?, resultUnit? }`——配置后卡片进入**计算模式**：输入变化即时求值、结果行实时显示（**不消耗对话轮次**）；提交按钮变为「发送给 AI」，把字段值与 `result` 一并带回模型
+2. 公式为**自研受限 DSL**：数字、字段名变量、`+ - * / ^`、括号、一元负号、`ROUND(x, n)`、`LOOKUP(字段, 表名)`；数据经 `tables` 内联（键 = select 选项值）
+3. **解析器与求值器置于 `packages/shared/src/formula.ts`**——服务端声明期校验（语法/未知字段/未知表/表名重复 → 自修复错误），浏览器端求值；单源同构
+4. 求值失败（缺值/非数值/除零/查无键/溢出）一律返回 `null`，UI 显示「—」——绝不上屏半成品数值、绝不抛错
+5. 计算模式**不锁定已消费**（常驻小工具，可反复调参、随时再发送）；结果经 `CardActionPayload.result` 随协议回传
+
+**原因**：
+- 无状态工具的正确形态是「模型声明数据与公式，UI 本地计算」——回传模型对这类场景是纯浪费；计算是确定性的，本地结果与模型算的别无二致，且即时
+- 不用 `eval`/`Function`：手写词法 + 递归下降约 250 行，产物只有算术，天然无注入面；同时因为要**同源**（服务端校验 + 浏览器求值），字符串替换类偷懒方案不可维护
+- 刻意不做通用表达式语言（无比较/条件/字符串运算）：语法面每大一分，模型作者错误率与自修复成本就涨一分；长尾计算需求留给 AppBlock 逃生舱（M4）
+
+**备选与权衡**：
+- ❌ eval/Function 求值：注入面，且服务端无法安全校验
+- ❌ 固定算子库（汇率/单位专用组件）：组合爆炸，每个新工具都要发版
+- ❌ 自由 JS/自然语言公式：违背 Chat Components 的 schema 约束原则
+- ⚠️ 字段/表名沿用标识符 pattern，故字段名不可为 `ROUND`/`LOOKUP`（工具描述已提示）
+
+**影响**：
+- `packages/shared/src/formula.ts`（新）与 package.json 导出；`types.ts` 的 `CardActionPayload.result`
+- `apps/server/src/tools/ui-cards/catalog.ts`：compute schema + 声明期校验 + 描述更新（golden 重生成）
+- `apps/web/src/components/cards/form/FormCard.tsx`（计算模式）；`cardInteractionStore` / `useGroupChat` / `CardActionChip`（result 透传）；i18n 三语 3 键
+- 测试：`formula.test.ts`（12 例）+ card-tool compute 5 例，server 242 全绿

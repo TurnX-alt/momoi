@@ -42,7 +42,7 @@
 | `ui_stat` | stat | `items`（1-6 项，每项 label+value） | value 为格式化展示字符串；`delta` 数值变化量 + `deltaLabel` 说明 |
 | `ui_table` | table | `columns`（1-12 列）, `rows` | 每行单元格数 = 列数；单元格为字符串；≤200 行 |
 | `ui_diagram` | diagram | `code`（Mermaid DSL） | 完整源码不含围栏标记；≤8000 字符 |
-| `ui_form` | form | `fields`（1-12 个字段） | 字段类型 text/number/textarea/select/multiselect/slider/checkbox/button-group；`name` 为回传键（字母下划线开头、唯一，pattern 约束）；select/multiselect/button-group 必填 `options`（2-8 个）且仅限这三类；min/max/step 仅 slider；提交后内容作为新用户消息回传 |
+| `ui_form` | form | `fields`（1-12 个字段） | 字段类型 text/number/textarea/select/multiselect/slider/checkbox/button-group；`name` 为回传键（字母下划线开头、唯一，pattern 约束）；select/multiselect/button-group 必填 `options`（2-8 个）且仅限这三类；min/max/step 仅 slider；提交后内容作为新用户消息回传；可选 `compute` 本地实时计算（D55，见〈本地实时计算〉） |
 
 通用可选参数：`title`（≤60 字符）——执行时提取到 `CardDescriptor.title`（CardFrame 统一渲染），不留在 props。
 
@@ -91,7 +91,17 @@ interface CardDescriptor {
 - **分发**：FormCard 经模块级 `cardInteractionStore`（`emitCardAction`）调用 `useGroupChat` 注册的 handler——消息流内无 Context 通道可穿透 trace 渲染层，且气泡 key 变化会重挂载，状态必须模块级
 - **发送路由**：单聊 `sendMessage`；群聊/世界 `sendGroupMessage` 且合成文本以 `@所属Agent名 ` 开头（置首发言）；**生成中不受理**并轻提示（`sendMessage` 同会话串行锁会静默丢弃）——handler 返回 false 时表单不标记已消费
 - **防重复**：提交受理后 `markCardConsumed`（模块级 Set + `useSyncExternalStore` 订阅），控件锁定显示「已提交」；跨气泡重挂载存活（页面刷新后失效，v1 接受）
-- **渲染**：user 气泡内围栏由 `MessageContent` 切出（与 mermaid 同模式）→ `CardActionChip` 紧凑 chip（label + payload ≤3 项 key=value 摘要）；解析失败回退原始文本
+- **渲染**：user 气泡内围栏由 `MessageContent` 切出（与 mermaid 同模式）→ `CardActionChip` 紧凑 chip（label + payload ≤3 项 key=value 摘要，`result` 存在时显示 `= {result}`）；解析失败回退原始文本
+
+### 本地实时计算（compute，D55）
+
+`ui_form` 的可选 `compute` 配置让卡片成为**无状态小工具**（汇率换算/单位换算/贷款月供等）：模型在声明期提供数据与公式，交互在卡片内即时求值——**不消耗对话轮次**；用户想把结果带到对话里时才按「发送给 AI」。
+
+- **公式**：数字、字段名变量、`+ - * / ^`、括号、一元负号、`ROUND(x, n)`、`LOOKUP(字段, 表名)`；`^` 右结合、指数可带负号；函数名大小写不敏感；字段名不可为 `ROUND`/`LOOKUP`
+- **数据表**：`tables: [{ name, entries: [{ key, value }] }]`——键对应 select/button-group 字段的**选项值**（如 `"USD>CNY"`）
+- **实现单源**：`packages/shared/src/formula.ts`——服务端声明期 `parseFormula` 校验（语法/未知字段/未知表/表名重复 → 自修复错误），浏览器端 `evaluateFormula` 求值；手写词法+递归下降，**无 eval/Function**
+- **失败语义**：求值失败（缺值/非数值/除零/查无键/溢出）一律 `null` → UI 显示「—」（title 提示检查输入）——绝不上屏半成品数值
+- **计算模式行为**：输入变化即求值（实时）；提交按钮变为「发送给 AI」（secondary）且 payload 携带 `result`；**不锁定已消费**（可反复调参、随时再发送）
 
 ## 行为约束
 
@@ -109,7 +119,7 @@ interface CardDescriptor {
 2. **中继复用**：远程流事件经同一 `handleSSEEvent` 处理——卡片天然多设备同步，无需专门代码
 3. **memo**：`CardRenderer` 以 `React.memo` + 稳定的 `card` 对象引用避免流式期间逐帧重渲染（图表尤其敏感）
 4. **主题**：图表色板经 `useDarkMode`（MutationObserver 观察 `dark` class）跟随切换
-5. **表单卡交互**：必填校验在前端先行（服务端不校验交互值——用户伪造自己的交互事件只影响自己的会话，威胁模型不成立）；提交发射、生成中拦截与已消费锁定见〈card-action 围栏协议〉
+5. **表单卡交互**：必填校验在前端先行（服务端不校验交互值——用户伪造自己的交互事件只影响自己的会话，威胁模型不成立）；提交发射、生成中拦截与已消费锁定见〈card-action 围栏协议〉；compute 计算模式实时求值、不锁定——见〈本地实时计算〉
 
 ## 验收标准
 
@@ -118,6 +128,7 @@ interface CardDescriptor {
 - ✅ `schema-validate.test.ts`：通用校验器全子集（嵌套路径/enum/边界/错误封顶）
 - ✅ `card-tool.test.ts`：五工具的合法产出与全部拒绝路径（含自修复 summary 格式）
 - ✅ `history-cards.test.ts`：注入格式 / 标题截断 / 多卡 / 损坏 JSON / 引用不变
+- ✅ `formula.test.ts`：DSL 解析与求值全路径（优先级 / 幂右结合 / ROUND / LOOKUP / 语法错误族 / 失败一律 null）
 - ✅ `card-sse.test.ts`（伪造 fetch 驱动真实 `runPiAgentLoop`）：card 事件先于 tool_result、载荷完整、校验失败无卡片、一轮多卡、trace 条目紧随 tool_call、tool_call 状态照常回填
 - ✅ `golden.test.ts`：`chat/ui-cards` 片段文本锁定 + 四个 `tool.description` 用例 + 结构性 bullet 断言
 
@@ -133,7 +144,7 @@ interface CardDescriptor {
 
 ### 分期验收（M2-M5）
 
-- **M2（已实装）**：模型出表单 → 填写提交 → 历史出现交互 chip → 新一轮正确引用表单值；「把刚才的柱状图改成折线」成功（历史注入生效）；双击提交只触发一轮；已消费卡片控件禁用；生成中提交被 toast 拦下且表单不被锁定；群聊卡片按钮 → @所属成员置首回应
+- **M2（已实装）**：模型出表单 → 填写提交 → 历史出现交互 chip → 新一轮正确引用表单值；「把刚才的柱状图改成折线」成功（历史注入生效）；双击提交只触发一轮；已消费卡片控件禁用；生成中提交被 toast 拦下且表单不被锁定；群聊卡片按钮 → @所属成员置首回应；compute 卡片输入即时出结果（零轮次）、「发送给 AI」把 result 带回模型、反复调参不锁定
 - **M3**：微信/QQ 触发画卡 → web 侧实时可见且刷新仍在；回退掉卡片所在消息后卡片随消息消失
 - **M4**：自包含 HTML 计数器可交互 + 自动高度；外部 fetch 被 CSP 阻断；>64KB 拒绝并自修复；主题切换正确；消息卸载 iframe 销毁
 - **M5**：VRM 模型加载 + idle 动画；切换 animation 生效；无 WebGL 优雅降级；three chunk 仅 3D 卡首次渲染拉取
