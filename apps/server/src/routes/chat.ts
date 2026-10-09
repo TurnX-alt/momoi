@@ -101,7 +101,7 @@ chatRoute.post('/', async (c) => {
     throw new ApiError(ErrCode.UNAUTHORIZED)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string; workspace_id?: string | null }>()
+  const body = await c.req.json<{ message: string; conversation_id?: string; agent_id?: string; _retry?: boolean; _force_compliance?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }>; conversation_type?: 'direct' | 'group' | 'world'; agent_ids?: string[]; infinite_mode?: boolean; language?: string; device_id?: string; workspace_id?: string | null; world_laws?: string }>()
   const { message, conversation_id, _retry, _force_compliance, thinking_mode, attachments, conversation_type, agent_ids, infinite_mode, language, device_id, workspace_id, world_laws } = body
   const requestedAgentId = body.agent_id
   // 本轮实际采用的 Agent：新建会话取请求 agent_id；已有单聊会话锚定到
