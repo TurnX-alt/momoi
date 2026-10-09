@@ -6,7 +6,7 @@
 
 **与 markdown 输出的关系**：卡片是 markdown 的补充而非替代——能用一两句话讲清的内容不制卡（片段中有明确指引）；diagram 卡收编既有 mermaid 能力（DSL 原样保留，仅换进料通道，渲染器共享）。
 
-**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入）；M3 = IM 渠道 trace 补齐；M4 = 沙箱逃生舱（app）；M5 = 3D 角色卡（character）。分期细节见文末。
+**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入，已实装）；M3 = IM 渠道 trace 补齐；M4 = 沙箱逃生舱（app）；M5 = 3D 角色卡（character）。分期细节见文末。
 
 ## 涉及文件
 
@@ -32,7 +32,7 @@
 
 ## 接口契约
 
-### ui_* 工具面（M1：4 个）
+### ui_* 工具面（M1-M2：5 个）
 
 每个组件族一个工具，全部由 `catalog.ts` 的 spec 生成（工具定义、提示词目录、文档同源，永不漂移）：
 
@@ -42,6 +42,7 @@
 | `ui_stat` | stat | `items`（1-6 项，每项 label+value） | value 为格式化展示字符串；`delta` 数值变化量 + `deltaLabel` 说明 |
 | `ui_table` | table | `columns`（1-12 列）, `rows` | 每行单元格数 = 列数；单元格为字符串；≤200 行 |
 | `ui_diagram` | diagram | `code`（Mermaid DSL） | 完整源码不含围栏标记；≤8000 字符 |
+| `ui_form` | form | `fields`（1-12 个字段） | 字段类型 text/number/textarea/select/multiselect/slider/checkbox/button-group；`name` 为回传键（字母下划线开头、唯一，pattern 约束）；select/multiselect/button-group 必填 `options`（2-8 个）且仅限这三类；min/max/step 仅 slider；提交后内容作为新用户消息回传 |
 
 通用可选参数：`title`（≤60 字符）——执行时提取到 `CardDescriptor.title`（CardFrame 统一渲染），不留在 props。
 
@@ -82,9 +83,15 @@ interface CardDescriptor {
 - **图表色板**（dataviz 规范内置）：**颜色不是模型 props**——ChartCard 按 series 顺序从固定色板分配（`CHART_LIGHT`/`CHART_DARK`，与 `globals.css` 的 `--chart-1..8` 同源；双模式均以实际表面色通过 dataviz 校验器）；series ≤8 不循环；无双轴；≥2 序列必有图例（图例文字用墨色，色块承担身份）；饼图直接标注（对比度 relief）
 - **数值呈现**：stat 卡大数字用比例字；表格数字列右对齐 + `tabular-nums`（列内纵向对齐场景）
 
-### card-action 围栏协议（M2 规划，契约先行）
+### card-action 围栏协议（M2 已实装）
 
-用户与卡片交互（提交表单/点按钮）时，前端合成**普通用户消息**：一行人类可读摘要 + `CARD_ACTION_FENCE`（```` ```card-action ````）内的 `CardActionPayload` JSON，经既有 `POST /api/chat` 发起新一轮生成。围栏是唯一的机器可读载体：模型回喂天然可见、多设备同步免费、零迁移；前端在 user 气泡内把围栏渲染为紧凑交互 chip（不显示为代码块）。
+用户与卡片交互（提交表单/点按钮）时，前端合成**普通用户消息**：一行人类可读摘要（`chat.cardActionSummary(Named)`，UI 语言）+ `CARD_ACTION_FENCE`（```` ```card-action ````）内的 `CardActionPayload` JSON，经既有 `POST /api/chat` 发起新一轮生成（**无新端点**）。围栏是唯一的机器可读载体：模型回喂天然可见、多设备同步免费、零迁移。
+
+实装细节：
+- **分发**：FormCard 经模块级 `cardInteractionStore`（`emitCardAction`）调用 `useGroupChat` 注册的 handler——消息流内无 Context 通道可穿透 trace 渲染层，且气泡 key 变化会重挂载，状态必须模块级
+- **发送路由**：单聊 `sendMessage`；群聊/世界 `sendGroupMessage` 且合成文本以 `@所属Agent名 ` 开头（置首发言）；**生成中不受理**并轻提示（`sendMessage` 同会话串行锁会静默丢弃）——handler 返回 false 时表单不标记已消费
+- **防重复**：提交受理后 `markCardConsumed`（模块级 Set + `useSyncExternalStore` 订阅），控件锁定显示「已提交」；跨气泡重挂载存活（页面刷新后失效，v1 接受）
+- **渲染**：user 气泡内围栏由 `MessageContent` 切出（与 mermaid 同模式）→ `CardActionChip` 紧凑 chip（label + payload ≤3 项 key=value 摘要）；解析失败回退原始文本
 
 ## 行为约束
 
@@ -93,7 +100,7 @@ interface CardDescriptor {
 1. **捕获点唯一**：卡片仅在 `createEventEmitter` 的 `tool_execution_end` 分支捕获（`details.data.card`）——trace 与 SSE 同一处产出，避免双源漂移
 2. **事件顺序保证**：`card` 事件必定先于同 id 的 `tool_result` 到达客户端
 3. **校验权威在服务端**：前端轻校验只防崩；模型可见的错误经工具结果通道回传（不上 wire 错误码）
-4. **历史卡片感知（M2）**：回喂时经 `augmentHistoryWithCards()` 在含卡 assistant 消息 content 尾部注入 `[已渲染卡片：{component}「{title}」 id:{id}]` 摘要（标题截 40 字符，不动存储）
+4. **历史卡片感知**：回喂时经 `augmentRowsWithCards()`（`ai/history-cards.ts`）在含卡 assistant 行 content 尾部注入 `[已渲染卡片：{component}「{title}」 id:{id}]` 摘要（标题截 40 字符，不动存储；纯函数无 IO）——初始 history 构建与 reloadHistory 共用
 5. **IM 渠道（M3）**：wechat/qq 落库链路补齐 trace 字段后，IM 触发的卡片刷新不丢
 
 ### 客户端
@@ -102,13 +109,15 @@ interface CardDescriptor {
 2. **中继复用**：远程流事件经同一 `handleSSEEvent` 处理——卡片天然多设备同步，无需专门代码
 3. **memo**：`CardRenderer` 以 `React.memo` + 稳定的 `card` 对象引用避免流式期间逐帧重渲染（图表尤其敏感）
 4. **主题**：图表色板经 `useDarkMode`（MutationObserver 观察 `dark` class）跟随切换
+5. **表单卡交互**：必填校验在前端先行（服务端不校验交互值——用户伪造自己的交互事件只影响自己的会话，威胁模型不成立）；提交发射、生成中拦截与已消费锁定见〈card-action 围栏协议〉
 
 ## 验收标准
 
 ### 自动化：`pnpm --filter @momoi/server test`
 
 - ✅ `schema-validate.test.ts`：通用校验器全子集（嵌套路径/enum/边界/错误封顶）
-- ✅ `card-tool.test.ts`：四工具的合法产出与全部拒绝路径（含自修复 summary 格式）
+- ✅ `card-tool.test.ts`：五工具的合法产出与全部拒绝路径（含自修复 summary 格式）
+- ✅ `history-cards.test.ts`：注入格式 / 标题截断 / 多卡 / 损坏 JSON / 引用不变
 - ✅ `card-sse.test.ts`（伪造 fetch 驱动真实 `runPiAgentLoop`）：card 事件先于 tool_result、载荷完整、校验失败无卡片、一轮多卡、trace 条目紧随 tool_call、tool_call 状态照常回填
 - ✅ `golden.test.ts`：`chat/ui-cards` 片段文本锁定 + 四个 `tool.description` 用例 + 结构性 bullet 断言
 
@@ -124,7 +133,7 @@ interface CardDescriptor {
 
 ### 分期验收（M2-M5）
 
-- **M2**：模型出表单 → 填写提交 → 历史出现交互 chip → 新一轮正确引用表单值；「把刚才的柱状图改成折线」成功（历史注入生效）；双击提交只触发一轮；已消费卡片控件禁用
+- **M2（已实装）**：模型出表单 → 填写提交 → 历史出现交互 chip → 新一轮正确引用表单值；「把刚才的柱状图改成折线」成功（历史注入生效）；双击提交只触发一轮；已消费卡片控件禁用；生成中提交被 toast 拦下且表单不被锁定；群聊卡片按钮 → @所属成员置首回应
 - **M3**：微信/QQ 触发画卡 → web 侧实时可见且刷新仍在；回退掉卡片所在消息后卡片随消息消失
 - **M4**：自包含 HTML 计数器可交互 + 自动高度；外部 fetch 被 CSP 阻断；>64KB 拒绝并自修复；主题切换正确；消息卸载 iframe 销毁
 - **M5**：VRM 模型加载 + idle 动画；切换 animation 生效；无 WebGL 优雅降级；three chunk 仅 3D 卡首次渲染拉取
