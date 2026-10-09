@@ -12,6 +12,7 @@ export function CardActionChip({ payload }: { payload: CardActionPayload }) {
     <span className="my-1 inline-flex max-w-full items-center gap-1.5 rounded-full border border-black/10 bg-black/10 px-2.5 py-1 text-xs dark:border-white/15 dark:bg-white/15">
       <Zap className="h-3 w-3 flex-shrink-0" />
       <span className="font-medium">{payload.label ?? payload.action}</span>
+      {payload.result != null && <span className="font-mono text-xs opacity-90">= {payload.result}</span>}
       {summary && <span className="truncate opacity-80">{summary}</span>}
     </span>
   )

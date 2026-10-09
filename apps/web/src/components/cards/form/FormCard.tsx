@@ -15,6 +15,8 @@ import { Switch } from '../../ui/switch'
 import { Button } from '../../ui/button'
 import { cn } from '../../../lib/utils'
 import { emitCardAction, markCardConsumed, useCardConsumed } from '../cardInteractionStore'
+import { parseFormula, evaluateFormula } from '@momoi/shared/formula'
+import type { FormulaNode } from '@momoi/shared/formula'
 import type { CardComponentProps } from '../registry'
 
 // 表单卡（M2）：字段渲染 + 客户端必填校验 + 提交发射。
@@ -41,10 +43,19 @@ interface FormField {
   step?: number
 }
 
+interface FormCompute {
+  ast: FormulaNode
+  tables: Record<string, Record<string, number>>
+  resultLabel?: string
+  resultUnit?: string
+}
+
 interface FormData {
   description?: string
   fields: FormField[]
   submitLabel?: string
+  /** 本地实时计算配置（有则进入计算模式：结果实时显示、不消耗轮次，按钮变为「发送给 AI」） */
+  compute?: FormCompute
 }
 
 type FieldValue = string | number | boolean | string[]
@@ -75,10 +86,38 @@ function parseProps(raw: Record<string, unknown>): FormData {
       step: typeof o.step === 'number' ? o.step : undefined,
     }
   })
+  let compute: FormCompute | undefined
+  const rawCompute = raw.compute as Record<string, unknown> | undefined
+  if (rawCompute && typeof rawCompute === 'object') {
+    const parsed = parseFormula(String(rawCompute.formula ?? ''))
+    if (!parsed.ok) throw new Error(`compute.formula 无效：${parsed.error}`)
+    const tables: Record<string, Record<string, number>> = {}
+    if (Array.isArray(rawCompute.tables)) {
+      for (const t of rawCompute.tables as Array<Record<string, unknown>>) {
+        const entries: Record<string, number> = {}
+        if (Array.isArray(t.entries)) {
+          for (const e of t.entries as Array<Record<string, unknown>>) {
+            entries[String(e.key)] = Number(e.value)
+          }
+        }
+        tables[String(t.name)] = entries
+      }
+    }
+    compute = {
+      ast: parsed.ast,
+      tables,
+      resultLabel:
+        typeof rawCompute.resultLabel === 'string' && rawCompute.resultLabel ? rawCompute.resultLabel : undefined,
+      resultUnit:
+        typeof rawCompute.resultUnit === 'string' && rawCompute.resultUnit ? rawCompute.resultUnit : undefined,
+    }
+  }
+
   return {
     description: typeof raw.description === 'string' && raw.description ? raw.description : undefined,
     fields,
     submitLabel: typeof raw.submitLabel === 'string' && raw.submitLabel ? raw.submitLabel : undefined,
+    compute,
   }
 }
 
@@ -100,6 +139,11 @@ function isMissing(f: FormField, v: FieldValue | undefined): boolean {
   if (f.type === 'slider') return v == null
   if (f.type === 'multiselect') return !Array.isArray(v) || v.length === 0
   return typeof v !== 'string' || v.trim() === ''
+}
+
+/** 结果格式化：整数原样，小数去除浮点噪声（最多 6 位） */
+function formatNumber(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(6)))
 }
 
 function buildPayload(fields: FormField[], values: Record<string, FieldValue>): Record<string, unknown> {
@@ -149,6 +193,15 @@ export function FormCard({ props, cardId, cardTitle, ownerAgentName }: CardCompo
   const invalid = (f: FormField): boolean => attempted && isMissing(f, values[f.name])
   const anyMissing = attempted && data.fields.some((f) => isMissing(f, values[f.name]))
 
+  // 本地实时计算：任何输入变化即求值；失败（缺值/非数/除零）显示占位符，绝不回传
+  const result = useMemo(
+    () =>
+      data.compute
+        ? evaluateFormula(data.compute.ast, { valueOf: (f) => values[f], tables: data.compute.tables })
+        : null,
+    [data.compute, values],
+  )
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     if (!cardId || consumed) return
@@ -158,12 +211,14 @@ export function FormCard({ props, cardId, cardTitle, ownerAgentName }: CardCompo
       cardId,
       component: 'form',
       action: 'submit',
-      label: data.submitLabel ?? t('chat.cardFormSubmit'),
+      label: data.compute ? t('chat.cardSendToAI') : (data.submitLabel ?? t('chat.cardFormSubmit')),
       payload: buildPayload(data.fields, values),
+      result: data.compute && result != null ? result : undefined,
       cardTitle,
       ownerAgentName,
     })
-    if (ok) markCardConsumed(cardId)
+    // 计算模式 = 常驻小工具（可反复调参、随时再发送）——不锁定已消费
+    if (ok && !data.compute) markCardConsumed(cardId)
   }
 
   const renderField = (f: FormField) => {
@@ -295,8 +350,41 @@ export function FormCard({ props, cardId, cardTitle, ownerAgentName }: CardCompo
 
       {anyMissing && <div className="text-xs text-destructive">{t('chat.cardFormRequired')}</div>}
 
-      <Button type="submit" size="sm" disabled={consumed} className="w-full">
-        {consumed ? t('chat.cardFormSubmitted') : (data.submitLabel ?? t('chat.cardFormSubmit'))}
+      {data.compute && (
+        <div className="flex items-center justify-between rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+          <span className="text-xs text-muted-foreground">
+            {data.compute.resultLabel ?? t('chat.cardComputeResult')}
+          </span>
+          {result != null ? (
+            <span className="text-base font-semibold tabular-nums">
+              {formatNumber(result)}
+              {data.compute.resultUnit && (
+                <span className="ml-0.5 text-sm font-medium text-muted-foreground">{data.compute.resultUnit}</span>
+              )}
+            </span>
+          ) : (
+            <span
+              className="text-base font-semibold text-muted-foreground"
+              title={t('chat.cardComputeInvalid')}
+            >
+              —
+            </span>
+          )}
+        </div>
+      )}
+
+      <Button
+        type="submit"
+        size="sm"
+        variant={data.compute ? 'secondary' : 'default'}
+        disabled={consumed}
+        className="w-full"
+      >
+        {consumed
+          ? t('chat.cardFormSubmitted')
+          : data.compute
+            ? t('chat.cardSendToAI')
+            : (data.submitLabel ?? t('chat.cardFormSubmit'))}
       </Button>
     </form>
   )

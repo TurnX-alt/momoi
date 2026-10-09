@@ -287,6 +287,7 @@ export function useGroupChat() {
         action: ev.action,
         label: ev.label,
         payload: ev.payload,
+        result: ev.result,
       })
       const text = ev.ownerAgentName && isGroupMode ? `@${ev.ownerAgentName} ${composed}` : composed
       if (isGroupMode) void sendGroupMessage(text, true)

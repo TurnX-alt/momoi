@@ -19,6 +19,8 @@ export interface CardActionEvent {
   cardTitle?: string
   /** 群聊：卡片所属 Agent 名（合成消息 @ 前缀，置首发言） */
   ownerAgentName?: string
+  /** 本地计算模式：卡片内算出的结果（随「发送给 AI」带回模型） */
+  result?: number
 }
 
 /** 返回 false = 未被受理（如正在生成 / handler 未挂载），调用方不应标记已消费 */
