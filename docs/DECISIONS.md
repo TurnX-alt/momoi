@@ -1547,3 +1547,38 @@
 - `apps/web/src/components/cards/app/AppBlockCard.tsx`（新）+ registry 注册；独立懒加载 chunk
 - 测试：ui_app 五用例（合法 / 合计超限 / 单字段超长 / 缺 html / height 越界），server 251 全绿
 - 文档：module-intelligent-ui.md 增〈AppBlock 沙箱〉节与验收项
+
+---
+
+## D58：3D 角色卡——VRM + 三级降级、零资产默认示例、沿用无 manualChunks
+
+**日期**：2026-10-09
+
+**背景**：M5 收官——让模型在聊天里展示 3D 虚拟角色（VRM 模型 + 表情 + 动作动画）。Momoi 是角色扮演平台，3D 形象与角色扮演场景天然契合。
+
+**决策**：
+1. 技术栈：three@0.186 + @pixiv/three-vrm@3.5（含 three-vrm-animation）+ @types/three；全部经 `CharacterCard` 懒加载组件模块静态引入
+2. **不做 manualChunks**（沿用 D54 的 Rolldown 依赖闭包教训）——默认拆分下三件套（约 195KB gzip）留在 CharacterCard 块内，无 3D 卡的会话永不加载
+3. 资产约定：`apps/web/public/vrm/` 目录（文件名引用，随构建拷贝、不入 git）；`model`/`animation` 支持 https 直链；**省略 model 时加载 three-vrm 官方示例模型**——零资产开箱可验收
+4. 动画优先级：`.vrma` → AnimationMixer 循环；失败/缺省 → 程序化 idle（正弦呼吸 + 微摆）
+5. 降级三级：WebGL 探测（内联提示）/ 模型加载失败（局部错误视图 + 原因）/ 动画失败（warn + 回落 idle）
+6. 性能与生命周期：DPR ≤2、离屏暂停 RAF、包围盒自动取景、卸载 deepDispose、路径禁 `..`
+7. v1 无轨道控制（避免与页面滚动 / 触摸手势冲突）
+
+**原因**：
+- VRM 是动漫系虚拟角色的事实标准（人形骨骼 + 表情预设 + MToon 材质），three-vrm 是成熟的开源加载链路——表情/动作开箱即得；裸 glTF 则要自建全部人形约定
+- 零资产默认示例模型让 3D 链路在没有用户资产的实例上也可验收（手工验收即依赖它）
+- 三级降级把最坏情况限制成一张提示卡而非崩溃——与全项目容错基线一致
+
+**备选与权衡**：
+- ❌ Live2D：Cubism SDK 授权约束更强、工具链更封闭，且非 3D
+- ❌ 裸 glTF + 手写骨骼动画：放弃 VRM 人形/表情标准，工程量爆炸
+- ❌ 强制用户先放资产才可用：开箱不可验证；默认示例模型解决
+- ⚠️ 示例模型托管于 pixiv.github.io——离线环境走 load-failed 降级（放本地资产即可消除外网依赖）
+- ⚠️ 主题切换不重建 3D（透明背景自然适配明暗）——与 AppBlock 的 srcDoc 重建策略不同：场景重载代价过高，透明度已足够
+
+**影响**：
+- `apps/server/src/tools/ui-cards/catalog.ts`：character spec（required 为空——全可选）+ `..` 路径校验；golden 重生成
+- `apps/web/src/components/cards/character/CharacterCard.tsx`（新）+ registry；`apps/web/public/vrm/README.md`（新）；i18n 三语 2 键
+- 依赖（web）：three / @pixiv/three-vrm / @pixiv/three-vrm-animation / @types/three
+- 测试：ui_character 五用例（合法 / 空参默认 / `..` 路径 / 权重越界 / 缺 name），server 257 全绿

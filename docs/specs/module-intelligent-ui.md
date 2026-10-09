@@ -6,7 +6,7 @@
 
 **与 markdown 输出的关系**：卡片是 markdown 的补充而非替代——能用一两句话讲清的内容不制卡（片段中有明确指引）；diagram 卡收编既有 mermaid 能力（DSL 原样保留，仅换进料通道，渲染器共享）。
 
-**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入，已实装）；M3 = IM 渠道结构性关闭卡片（网页版专属，已实装，D56）；M4 = 沙箱逃生舱（app，已实装，D57）；M5 = 3D 角色卡（character）。分期细节见文末。
+**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入，已实装）；M3 = IM 渠道结构性关闭卡片（网页版专属，已实装，D56）；M4 = 沙箱逃生舱（app，已实装，D57）；M5 = 3D 角色卡（character，已实装，D58）。**全部里程碑已实装。**
 
 **渠道边界**：生成式卡片**仅限网页版**——IM 渠道（微信/QQ）以 `uiCards: false` 运行，模型对卡片完全无感（D56）。
 
@@ -25,7 +25,8 @@
 | `apps/web/src/components/cards/registry.ts` | 组件注册表：`CardComponent` → 懒加载组件映射 |
 | `apps/web/src/components/cards/CardRenderer.tsx` | 渲染入口：查表 + Suspense + 局部错误边界（memo） |
 | `apps/web/src/components/cards/CardFrame.tsx` | 统一外壳：圆角边框卡 + 可选标题，`max-w-2xl` |
-| `apps/web/src/components/cards/{chart,stat,table,diagram}/` | 四类组件实现（chart 含 `palette.ts` 双模式色板） |
+| `apps/web/src/components/cards/{chart,stat,table,diagram,form,app,character}/` | 七类组件实现（chart 含 `palette.ts` 双模式色板） |
+| `apps/web/public/vrm/` | VRM 模型/动作资产目录（文件名为卡片引用键；大文件不入 git） |
 | `apps/web/src/components/chat/MermaidBlock.tsx` | Mermaid 渲染共享块（markdown 围栏路径 + diagram 卡 `bare` 模式） |
 | `apps/web/src/components/chat/MessageBubble.tsx` | `groupAndRenderTrace` card 分支；ui_* 工具条目被卡片认领后不进工具栈 |
 | `apps/web/src/hooks/useChat.ts` | `handleSSEEvent` card case（含多设备中继复用） |
@@ -34,7 +35,7 @@
 
 ## 接口契约
 
-### ui_* 工具面（M1-M4：6 个）
+### ui_* 工具面（M1-M5：7 个）
 
 **仅网页版暴露**（D56）——IM 渠道以 `uiCards: false` 运行，ui_* 工具被结构性剔除、卡片目录片段不注入。
 
@@ -48,6 +49,7 @@
 | `ui_diagram` | diagram | `code`（Mermaid DSL） | 完整源码不含围栏标记；≤8000 字符 |
 | `ui_form` | form | `fields`（1-12 个字段） | 字段类型 text/number/textarea/select/multiselect/slider/checkbox/button-group；`name` 为回传键（字母下划线开头、唯一，pattern 约束）；select/multiselect/button-group 必填 `options`（2-8 个）且仅限这三类；min/max/step 仅 slider；提交后内容作为新用户消息回传；可选 `compute` 本地实时计算（D55，见〈本地实时计算〉） |
 | `ui_app` | app | `html` | 自包含 HTML/CSS/JS 单页应用（沙箱渲染）；html+css+js 合计 ≤64000 字符；`height` 64-960（默认 320）；无网络/无存储/无外部资源——全部内联（D57，见〈AppBlock 沙箱〉） |
+| `ui_character` | character | （全可选——省略 model 用内置示例） | VRM 模型（文件名 → `/vrm/<name>` 或 https 直链）；`.vrma` 动作动画；表情 `[{name, weight}]`（≤6，未知名称忽略）；`caption` 台词；`height` 240-640（默认 360）；路径禁 `..`（D58，见〈3D 角色卡〉） |
 
 通用可选参数：`title`（≤60 字符）——执行时提取到 `CardDescriptor.title`（CardFrame 统一渲染），不留在 props。
 
@@ -123,6 +125,19 @@ interface CardDescriptor {
 - **生命周期**：React key = 卡片 id，消息卸载即 iframe 销毁；无持久化、无 Service Worker
 - **注入块防逃逸**：`escapeClosers` 将用户 css/js 中的 `</script>`、`</style>` 序列改写为 `<\/script`、`<\/style`（`\/` 在两种宿主语法中均为合法转义）
 
+### 3D 角色卡（M5 / D58）
+
+`ui_character` 加载 VRM 虚拟角色：模型 + 表情 + `.vrma` 动作动画 + 台词。
+
+- **资产约定**：`model` 为文件名（解析为 `/vrm/<name>`，物理位置 `apps/web/public/vrm/`，随构建拷贝、不入 git）或 https 直链；**省略时用 three-vrm 官方示例模型**——零资产开箱可用；`animation` 同理（`.vrma`）；路径含 `..` 拒绝
+- **分包**：three + @pixiv/three-vrm 静态内建于懒加载组件模块——**刻意不做 manualChunks**（Rolldown 依赖闭包吞噬教训见 D54）；`CharacterCard` 独立块 ~195KB gzip，无 3D 卡的会话永不加载
+- **动画优先级**：`.vrma` 加载成功 → AnimationMixer 循环播放；失败/缺省 → **程序化 idle**（正弦呼吸 + 微摆，零资产也有生命感）
+- **表情**：`expression: [{name, weight}]`（≤6）——依模型预设（happy/angry/sad/relaxed 等），未知名称静默忽略
+- **自动取景**：按模型包围盒计算相机距离与目标点；VRM 面向 -Z，转 180° 面向相机
+- **降级三级**：WebGL 探测失败 → 内联提示；模型加载失败 → 局部错误视图（含原因）；动画失败只 warn 回落到 idle
+- **性能与生命周期**：DPR 上限 2；`IntersectionObserver` 离屏暂停 RAF；卸载 `VRMUtils.deepDispose` + `renderer.dispose`；主题切换不重建（透明背景自然适配明暗）
+- **交互**：v1 无轨道控制/拖拽（避免与页面滚动与触摸手势冲突）
+
 ## 行为约束
 
 ### 服务端
@@ -141,13 +156,14 @@ interface CardDescriptor {
 4. **主题**：图表色板经 `useDarkMode`（MutationObserver 观察 `dark` class）跟随切换
 5. **表单卡交互**：必填校验在前端先行（服务端不校验交互值——用户伪造自己的交互事件只影响自己的会话，威胁模型不成立）；提交发射、生成中拦截与已消费锁定见〈card-action 围栏协议〉；compute 计算模式实时求值、不锁定——见〈本地实时计算〉
 6. **AppBlock**：iframe `sandbox="allow-scripts"` + CSP + source 校验三层见〈AppBlock 沙箱〉；主题切换重建 srcDoc；消息卸载即销毁
+7. **3D 角色卡**：三等降级、自动取景、程序化 idle、离屏暂停与 deepDispose 见〈3D 角色卡〉；卡片描述符不可变 → 场景 per-card 一次性初始化
 
 ## 验收标准
 
 ### 自动化：`pnpm --filter @momoi/server test`
 
 - ✅ `schema-validate.test.ts`：通用校验器全子集（嵌套路径/enum/边界/错误封顶）
-- ✅ `card-tool.test.ts`：六工具的合法产出与全部拒绝路径（含自修复 summary 格式）
+- ✅ `card-tool.test.ts`：七工具的合法产出与全部拒绝路径（含自修复 summary 格式）
 - ✅ `history-cards.test.ts`：注入格式 / 标题截断 / 多卡 / 损坏 JSON / 引用不变
 - ✅ `formula.test.ts`：DSL 解析与求值全路径（优先级 / 幂右结合 / ROUND / LOOKUP / 语法错误族 / 失败一律 null）
 - ✅ `card-sse.test.ts`（伪造 fetch 驱动真实 `runPiAgentLoop`）：card 事件先于 tool_result、载荷完整、校验失败无卡片、一轮多卡、trace 条目紧随 tool_call、tool_call 状态照常回填
@@ -168,7 +184,7 @@ interface CardDescriptor {
 - **M2（已实装）**：模型出表单 → 填写提交 → 历史出现交互 chip → 新一轮正确引用表单值；「把刚才的柱状图改成折线」成功（历史注入生效）；双击提交只触发一轮；已消费卡片控件禁用；生成中提交被 toast 拦下且表单不被锁定；群聊卡片按钮 → @所属成员置首回应；compute 卡片输入即时出结果（零轮次）、「发送给 AI」把 result 带回模型、反复调参不锁定
 - **M3（已实装，D56 反转）**：IM 渠道（微信/QQ）对卡片完全无感——工具表无 ui_*、系统提示无卡片目录、历史无卡片摘要；卡片的渠道语义为「仅网页版」；网页版全量能力不受影响
 - **M4（已实装）**：自包含 HTML 计数器可交互 + 自动高度；外部 fetch 被 CSP 阻断（devtools 验证）；>64KB 拒绝并自修复精简；明暗主题切换正确；消息卸载 iframe 销毁
-- **M5**：VRM 模型加载 + idle 动画；切换 animation 生效；无 WebGL 优雅降级；three chunk 仅 3D 卡首次渲染拉取
+- **M5（已实装）**：VRM 模型加载 + 表情/动画生效；缺省程序化 idle；无 WebGL 优雅降级；模型加载失败局部错误视图；three chunk（~195KB gzip）仅 3D 卡首次渲染拉取——默认示例模型可零资产验收
 
 ## 预留错误码（不注册进 errors.ts，启用时再登记）
 
