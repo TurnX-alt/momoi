@@ -1514,3 +1514,36 @@
 - `git revert` M3 提交（820c4d1）；`ai/pi-adapter.ts`（选项 / 提示词上下文 / toolCtx / 工具过滤）、`tools/types.ts`（ToolContext）、`im/wechat/chat.ts` 与 `im/qq/chat.ts`（三处调用传 `uiCards: false`）
 - 测试：card-sse 增 IM 闸门双用例（关闭 → 无法触发；缺省 → 仍触发）；golden 增结构性断言（`uiCards: []` → 目录块消失）
 - 文档：module-intelligent-ui.md 的分期 / 工具面 / 行为约束 / 验收同步；`D55` 的 compute 能力同样仅网页版可用（受同一闸门约束）
+
+---
+
+## D57：AppBlock 沙箱——模型 HTML 按不可信内容处理（sandbox 最小集 + CSP + source 校验）
+
+**日期**：2026-10-09
+
+**背景**：M4 让模型交付自包含 HTML/CSS/JS 小应用（AppBlock 逃生舱）。模型生成的代码从安全视角看是**不可信内容**——可能因幻觉、提示注入或用户诱导而包含数据外传、凭据索取、越权访问。需要「即便内容恶意也不出事」的边界。
+
+**决策**：
+1. `ui_app` 工具：html（必填）/ css / js / height（64-960，默认 320）；三者合计 ≤64000 字符（工具级拒绝 + 精简指引）
+2. **iframe 隔离**：`sandbox="allow-scripts"`（仅此一项）——无 `allow-same-origin` 即不透明源（无 cookie / localStorage / DOM 访问）；无 allow-forms / allow-popups / allow-top-navigation
+3. **CSP**（srcDoc 内 meta）：`default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https:; font-src data:`——**无网络**（fetch/XHR/WebSocket 落 default 全断）、无外部脚本/样式；图片限 data: 与 https: 直链（与 markdown 图片现状同级）
+4. **postMessage 校验**：不透明源 origin 恒为 `'null'` 无法鉴别，改以 `event.source === iframe.contentWindow` 身份校验；仅接受 resize 消息；height clamp [64,960]；v1 无 parent→app 通道
+5. 主题变量（含 `--chart-1..8`）注入沙箱；主题切换重建 srcDoc（状态重置——v1 接受）
+6. 自动高度：沙箱助手定义 `momoiResize()` + 加载/尺寸变化自动上报；`escapeClosers` 防 `</script>`/`</style>` 序列提前闭合注入块
+
+**原因**：
+- 三层边界各司其职：sandbox 防「越权」（跨源 / 存储 / 导航）；CSP 防「外传」（网络）；source 校验防「伪造」（其他窗口冒充 resize 消息）
+- **无网络是关键取舍**：模型需要数据时内联（工具描述明示），换来数据外传与信标追踪的结构性不可能——即便脚本被诱导索取凭据，也没有网络可送达
+- 与整体路线一致：模型输出永不进入可信执行路径（对照 ChatGPT DIL 的 sandbox + lockdown，用平台原生最小能力集达成同等级隔离）
+
+**备选与权衡**：
+- ❌ `allow-same-origin`（或省略 sandbox）：同源可达父文档 / cookie——等同于放弃边界
+- ❌ 网络白名单代理：引入服务端中转与额外攻击面；内联数据已覆盖逃生舱的绝大多数场景
+- ❌ `<webview>` / 自绘渲染器：平台兼容与工程量都不划算
+- ⚠️ srcDoc 重建（主题切换）重置应用状态——v1 接受；未来若需保留，可为应用提供 postMessage 主题通道（v2 议题）
+
+**影响**：
+- `apps/server/src/tools/ui-cards/catalog.ts`：app spec + 64K 合计校验；golden 重生成（含目录行）
+- `apps/web/src/components/cards/app/AppBlockCard.tsx`（新）+ registry 注册；独立懒加载 chunk
+- 测试：ui_app 五用例（合法 / 合计超限 / 单字段超长 / 缺 html / height 越界），server 251 全绿
+- 文档：module-intelligent-ui.md 增〈AppBlock 沙箱〉节与验收项

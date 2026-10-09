@@ -6,7 +6,7 @@
 
 **与 markdown 输出的关系**：卡片是 markdown 的补充而非替代——能用一两句话讲清的内容不制卡（片段中有明确指引）；diagram 卡收编既有 mermaid 能力（DSL 原样保留，仅换进料通道，渲染器共享）。
 
-**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入，已实装）；M3 = IM 渠道结构性关闭卡片（网页版专属，已实装，D56）；M4 = 沙箱逃生舱（app）；M5 = 3D 角色卡（character）。分期细节见文末。
+**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入，已实装）；M3 = IM 渠道结构性关闭卡片（网页版专属，已实装，D56）；M4 = 沙箱逃生舱（app，已实装，D57）；M5 = 3D 角色卡（character）。分期细节见文末。
 
 **渠道边界**：生成式卡片**仅限网页版**——IM 渠道（微信/QQ）以 `uiCards: false` 运行，模型对卡片完全无感（D56）。
 
@@ -34,7 +34,7 @@
 
 ## 接口契约
 
-### ui_* 工具面（M1-M2：5 个）
+### ui_* 工具面（M1-M4：6 个）
 
 **仅网页版暴露**（D56）——IM 渠道以 `uiCards: false` 运行，ui_* 工具被结构性剔除、卡片目录片段不注入。
 
@@ -47,6 +47,7 @@
 | `ui_table` | table | `columns`（1-12 列）, `rows` | 每行单元格数 = 列数；单元格为字符串；≤200 行 |
 | `ui_diagram` | diagram | `code`（Mermaid DSL） | 完整源码不含围栏标记；≤8000 字符 |
 | `ui_form` | form | `fields`（1-12 个字段） | 字段类型 text/number/textarea/select/multiselect/slider/checkbox/button-group；`name` 为回传键（字母下划线开头、唯一，pattern 约束）；select/multiselect/button-group 必填 `options`（2-8 个）且仅限这三类；min/max/step 仅 slider；提交后内容作为新用户消息回传；可选 `compute` 本地实时计算（D55，见〈本地实时计算〉） |
+| `ui_app` | app | `html` | 自包含 HTML/CSS/JS 单页应用（沙箱渲染）；html+css+js 合计 ≤64000 字符；`height` 64-960（默认 320）；无网络/无存储/无外部资源——全部内联（D57，见〈AppBlock 沙箱〉） |
 
 通用可选参数：`title`（≤60 字符）——执行时提取到 `CardDescriptor.title`（CardFrame 统一渲染），不留在 props。
 
@@ -107,6 +108,21 @@ interface CardDescriptor {
 - **失败语义**：求值失败（缺值/非数值/除零/查无键/溢出）一律 `null` → UI 显示「—」（title 提示检查输入）——绝不上屏半成品数值
 - **计算模式行为**：输入变化即求值（实时）；提交按钮变为「发送给 AI」（secondary）且 payload 携带 `result`；**不锁定已消费**（可反复调参、随时再发送）
 
+### AppBlock 沙箱（M4 / D57）
+
+`ui_app` 让模型交付**自包含小应用**（小游戏、交互演示）。安全立场：**模型生成的 HTML 按不可信内容处理**——边界完全由三层承担，缺一不可：
+
+- **iframe 隔离**：`sandbox="allow-scripts"`（仅此一项）——无 `allow-same-origin` 即**不透明源**：脚本无法访问父文档 / localStorage / cookie；无 allow-forms / allow-popups / allow-top-navigation，表单提交、弹窗与跳转均被阻断
+- **CSP**（srcDoc 内 meta）：`default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https:; font-src data:`——fetch/XHR/WebSocket 全部阻断（**无网络**）、无外部脚本/样式；图片限 data: 与 https: 直链
+- **postMessage 校验**：不透明源 origin 恒为 `'null'` 无法鉴别，改以 `event.source === iframe.contentWindow` 身份校验；仅接受 `{source:'momoi-app', type:'resize', height}`；height clamp [64, 960]；v1 无 parent→app 消息
+
+其余契约：
+- **尺寸**：html+css+js 合计 ≤64000 字符（工具级拒绝 + 精简指引）；`height` 属性（64-960，默认 320）；沙箱助手定义 `momoiResize()` 并在加载/尺寸变化时自动上报——卡片自动高度
+- **主题**：宿主主题变量（含 `--chart-1..8`）注入沙箱 `:root`；主题切换重建 srcDoc（iframe 重载、应用状态重置——v1 接受）
+- **输入**：模型不要求用户输入凭据/敏感信息（工具描述明示）；即便输入，脚本也无网络可外发
+- **生命周期**：React key = 卡片 id，消息卸载即 iframe 销毁；无持久化、无 Service Worker
+- **注入块防逃逸**：`escapeClosers` 将用户 css/js 中的 `</script>`、`</style>` 序列改写为 `<\/script`、`<\/style`（`\/` 在两种宿主语法中均为合法转义）
+
 ## 行为约束
 
 ### 服务端
@@ -124,13 +140,14 @@ interface CardDescriptor {
 3. **memo**：`CardRenderer` 以 `React.memo` + 稳定的 `card` 对象引用避免流式期间逐帧重渲染（图表尤其敏感）
 4. **主题**：图表色板经 `useDarkMode`（MutationObserver 观察 `dark` class）跟随切换
 5. **表单卡交互**：必填校验在前端先行（服务端不校验交互值——用户伪造自己的交互事件只影响自己的会话，威胁模型不成立）；提交发射、生成中拦截与已消费锁定见〈card-action 围栏协议〉；compute 计算模式实时求值、不锁定——见〈本地实时计算〉
+6. **AppBlock**：iframe `sandbox="allow-scripts"` + CSP + source 校验三层见〈AppBlock 沙箱〉；主题切换重建 srcDoc；消息卸载即销毁
 
 ## 验收标准
 
 ### 自动化：`pnpm --filter @momoi/server test`
 
 - ✅ `schema-validate.test.ts`：通用校验器全子集（嵌套路径/enum/边界/错误封顶）
-- ✅ `card-tool.test.ts`：五工具的合法产出与全部拒绝路径（含自修复 summary 格式）
+- ✅ `card-tool.test.ts`：六工具的合法产出与全部拒绝路径（含自修复 summary 格式）
 - ✅ `history-cards.test.ts`：注入格式 / 标题截断 / 多卡 / 损坏 JSON / 引用不变
 - ✅ `formula.test.ts`：DSL 解析与求值全路径（优先级 / 幂右结合 / ROUND / LOOKUP / 语法错误族 / 失败一律 null）
 - ✅ `card-sse.test.ts`（伪造 fetch 驱动真实 `runPiAgentLoop`）：card 事件先于 tool_result、载荷完整、校验失败无卡片、一轮多卡、trace 条目紧随 tool_call、tool_call 状态照常回填
@@ -150,7 +167,7 @@ interface CardDescriptor {
 
 - **M2（已实装）**：模型出表单 → 填写提交 → 历史出现交互 chip → 新一轮正确引用表单值；「把刚才的柱状图改成折线」成功（历史注入生效）；双击提交只触发一轮；已消费卡片控件禁用；生成中提交被 toast 拦下且表单不被锁定；群聊卡片按钮 → @所属成员置首回应；compute 卡片输入即时出结果（零轮次）、「发送给 AI」把 result 带回模型、反复调参不锁定
 - **M3（已实装，D56 反转）**：IM 渠道（微信/QQ）对卡片完全无感——工具表无 ui_*、系统提示无卡片目录、历史无卡片摘要；卡片的渠道语义为「仅网页版」；网页版全量能力不受影响
-- **M4**：自包含 HTML 计数器可交互 + 自动高度；外部 fetch 被 CSP 阻断；>64KB 拒绝并自修复；主题切换正确；消息卸载 iframe 销毁
+- **M4（已实装）**：自包含 HTML 计数器可交互 + 自动高度；外部 fetch 被 CSP 阻断（devtools 验证）；>64KB 拒绝并自修复精简；明暗主题切换正确；消息卸载 iframe 销毁
 - **M5**：VRM 模型加载 + idle 动画；切换 animation 生效；无 WebGL 优雅降级；three chunk 仅 3D 卡首次渲染拉取
 
 ## 预留错误码（不注册进 errors.ts，启用时再登记）
