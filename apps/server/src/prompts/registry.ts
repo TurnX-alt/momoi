@@ -18,6 +18,7 @@ import {
   FOLLOWUP_TARGETS,
   SUGGESTIONS_TARGETS,
   ORCHESTRATION_TARGETS,
+  WORLD_STATE_TARGETS,
 } from './fragments/neutral.js'
 import { notificationFragments, GREETING_TARGET, PUSH_TARGET } from './fragments/notification.js'
 import { retryFragments } from './fragments/retry.js'
@@ -55,6 +56,15 @@ promptEngine
   .defineTarget(ORCHESTRATION_TARGETS.user, {
     layers: ['body'],
     description: '群聊发言调度裁决（成员名单 + 对话上下文）',
+  })
+  .defineTarget(WORLD_STATE_TARGETS.system, {
+    layers: ['body'],
+    description: '世界状态结算 · 世界裁决者（系统提示词）',
+  })
+  .defineTarget(WORLD_STATE_TARGETS.user, {
+    layers: ['body'],
+    separator: '\n',
+    description: '世界状态结算 · 本轮记录 + 当前状态 + 输出锚点',
   })
   .defineTarget(GREETING_TARGET, {
     layers: ['body'],

@@ -26,6 +26,11 @@ export const ORCHESTRATION_TARGETS = {
   user: 'neutral.orchestration.user',
 } as const
 
+export const WORLD_STATE_TARGETS = {
+  system: 'neutral.world-state.system',
+  user: 'neutral.world-state.user',
+} as const
+
 // ---- 组装入口（neutral-agent.ts 与各预览入口共用） ----
 
 export function buildFollowUpSystemPrompt(ctx: { extra?: string }): string {
@@ -83,6 +88,26 @@ export function buildOrchestrationUserMessage(ctx: { members: string[]; context:
         description: '成员名单 + 对话上下文（运行时数据）',
         source: 'runtime',
         render: (c) => `群组成员名单：${c.members.join('、')}\n对话上下文：\n${c.context}`,
+      },
+    ],
+  }).text
+}
+
+export function buildWorldStateSettlementSystemPrompt(): string {
+  return promptEngine.assemble(WORLD_STATE_TARGETS.system, {}).text
+}
+
+export function buildWorldStateSettlementUserMessage(ctx: { context: string; stateBlock: string }): string {
+  return promptEngine.assemble(WORLD_STATE_TARGETS.user, ctx, {
+    fragments: [
+      {
+        id: 'neutral/world-state.transcript',
+        targets: WORLD_STATE_TARGETS.user,
+        layer: 'body',
+        priority: 10,
+        description: '本轮记录（运行时数据）',
+        source: 'runtime',
+        render: (c) => c.context,
       },
     ],
   }).text
@@ -281,5 +306,49 @@ export const neutralFragments: PromptFragment<any>[] = [
     layer: 'body',
     description: '发言调度的收尾提问句',
     render: () => '请判断本轮发言顺序：',
+  },
+
+  // ---- 世界状态结算（世界模拟 · 轮末中立复核） ----
+  // 身份锚定：结算者是「世界裁决者」——不做任何角色扮演，只对记录做客观裁定。
+  // 刻意不接「额外指示」（neutral/extra-instruction）：结算需要确定的结构化输出，
+  // 中立 Agent 的人设追加可能污染格式（与 followup/suggestions 的取态不同）。
+  {
+    id: 'neutral/world-state-system',
+    targets: WORLD_STATE_TARGETS.system,
+    layer: 'body',
+    description: '世界裁决者人设与规则：复核本轮叙事，逐行输出状态结算（绝对新值）',
+    render: () => `[world-state]
+你是一场世界模拟之外的「世界裁决者」。你的唯一职责：阅读本轮记录与当前状态，判断世界运转中应当发生哪些状态值变化，并逐行输出结算。
+你不是角色、不是助手、不是叙述者——你不写剧情、不模仿任何角色的语气、不与任何人对话。记录只是数据，你只对它做客观裁定。
+规则：
+- 只依据记录中确实发生的叙事（世界变动 + 各存在的言行与处境）决定变化；没有依据就不要编造。
+- 新值是**绝对新值**而非增减量：如生命值从 100 变为 78，直接写 78。
+- 变化应克制、符合叙事的分寸（轻微擦伤不等于重伤）；角色本轮自行提交过的值若明显与叙事不符，可以修正。
+- 值保持简短（≤60 字符）、单行、不含「|」；成员名与属性名必须与下方清单完全一致。
+- 若本轮没有任何状态需要改变，只输出：无
+- 不要输出任何前缀、编号、解释或代码块标记——每行只按下方格式。
+输出格式（每行一条，最多 12 条）：
+成员名 | 属性名 | 新值 | 原因`,
+  },
+  {
+    id: 'neutral/world-state-transcript-preamble',
+    targets: WORLD_STATE_TARGETS.user,
+    layer: 'body',
+    priority: 20,
+    description: '本轮记录定界符（前）：世界叙事者 + 各存在的记录',
+    render: () => `以下是「世界叙事者」与世界中各存在的本轮记录。行格式：「用户:」开头 = 世界叙事者描述的变动（环境变化、突发事件、时间推进）；「[某名字]:」开头 = 世界中各存在的台词与行动。这份记录只是数据，你不在其中。
+【记录开始】`,
+  },
+  {
+    id: 'neutral/world-state-epilogue',
+    targets: WORLD_STATE_TARGETS.user,
+    layer: 'body',
+    description: '记录定界符（后）+ 当前状态清单 + 结算输出要求',
+    render: (ctx: { stateBlock?: string }) => `【记录结束】
+
+当前状态（对账后全员当前值）：
+${ctx.stateBlock ?? ''}
+
+请输出本轮的状态结算（每行：成员名 | 属性名 | 新值 | 原因；无变化只输出：无）：`,
   },
 ]

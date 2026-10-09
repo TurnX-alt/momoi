@@ -11,6 +11,7 @@ import {
   FOLLOWUP_TARGETS,
   SUGGESTIONS_TARGETS,
   ORCHESTRATION_TARGETS,
+  WORLD_STATE_TARGETS,
 } from './fragments/neutral.js'
 import { GREETING_TARGET } from './fragments/notification.js'
 
@@ -110,9 +111,13 @@ export function normalizePreviewContext(
     case SUGGESTIONS_TARGETS.system:
     case ORCHESTRATION_TARGETS.system:
       return { extra: asString(input.extra) }
+    case WORLD_STATE_TARGETS.system:
+      return {}
     case FOLLOWUP_TARGETS.user:
     case SUGGESTIONS_TARGETS.user:
       return { context: asString(input.context) ?? '' }
+    case WORLD_STATE_TARGETS.user:
+      return { context: asString(input.context) ?? '', stateBlock: asString(input.stateBlock) ?? '' }
     case ORCHESTRATION_TARGETS.user:
       return { members: asStringArray(input.members) ?? [], context: asString(input.context) ?? '' }
     case GREETING_TARGET:

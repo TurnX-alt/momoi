@@ -7,7 +7,7 @@ import { eq, and, count, sql, desc } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
 import { augmentRowsWithCards } from '../ai/history-cards.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
-import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutral-agent.js'
+import { generateNeutralFollowUp, generateNeutralSuggestions, generateWorldStateSettlement } from '../ai/neutral-agent.js'
 import { persistConversationStats } from '../lib/stats-store.js'
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage, Attachment, ConversationStats, TraceEntry, WorldStateDef, WorldStateRuntime } from '@momoi/shared/types'
@@ -26,6 +26,13 @@ import { countUnread } from '../lib/unread.js'
 import { trackUserActivity } from './user.js'
 import { resolveWorkspaceAnchor } from './workspaces.js'
 import { parseWorldRuntime, validateStates } from '../lib/world-state.js'
+import {
+  applyChanges,
+  appendTraceCard,
+  loadWorldState,
+  resolveMemberByName,
+  MAX_STATE_VALUE_LEN,
+} from '../lib/world-state.js'
 
 export const chatRoute = new Hono()
 
@@ -616,6 +623,58 @@ chatRoute.post('/', async (c) => {
         }
       }
 
+      // Helper: 轮末世界状态结算 —— 中立 Agent 以「世界裁决者」身份复核本轮叙事，
+      // 补充/修正状态变化（绝对新值；可覆盖角色本轮的夸张改动）。仅世界会话且已定义
+      // 状态时实际执行；零变更静默（不发卡不发事件）；失败开放。
+      // 必须在 streamSSE handler 返回前 await（同 suggestions 的约束）。
+      const WORLD_STATE_TIMEOUT_MS = 30_000
+      const settleWorldState = async (): Promise<void> => {
+        const targetMsgId = lastAssistantMsgId
+        if (!isWorld || targetMsgId === undefined) return // 本轮无 assistant 消息可挂
+        try {
+          const stateCtx = await loadWorldState(convId)
+          if (!stateCtx || stateCtx.defs.length === 0 || stateCtx.members.length === 0) return
+          const [config, agents, context] = await Promise.all([
+            getConfig(), listAgents(), buildNeutralContext(convId),
+          ])
+          const neutralAgent = agents.find((a) => a.id === NEUTRAL_AGENT_ID)
+          const model = neutralAgent?.model || agents[0]?.model || 'gpt-4o'
+          const stateBlock = stateCtx.members
+            .map((m) => `${m.name}：${stateCtx.defs.map((d) => `${d.name} ${stateCtx.view[m.id]?.[d.name] ?? d.default}`).join('；')}`)
+            .join('\n')
+
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const timeout = new Promise<null>((resolve) => {
+            timer = setTimeout(() => resolve(null), WORLD_STATE_TIMEOUT_MS)
+          })
+          const items = await Promise.race([
+            generateWorldStateSettlement(config, model, context, stateBlock),
+            timeout,
+          ])
+          if (timer) clearTimeout(timer)
+          if (!items || items.length === 0) return
+
+          // 行 → 校验（成员/属性必须存在 + 值护栏）→ 绝对新值；不合法的行静默丢弃
+          const attrNames = new Set(stateCtx.defs.map((d) => d.name))
+          const edits: Array<{ agentId: string; attribute: string; value: string; reason?: string }> = []
+          for (const item of items) {
+            const member = resolveMemberByName(stateCtx.members, item.agentName)
+            if (!member || !attrNames.has(item.attribute)) continue
+            if (!item.value || item.value.length > MAX_STATE_VALUE_LEN || /[|\r\n]/.test(item.value)) continue
+            edits.push({ agentId: member.id, attribute: item.attribute, value: item.value, reason: item.reason })
+          }
+          const { applied, card } = await applyChanges(stateCtx, edits, '状态结算')
+          if (applied.length === 0 || !card) return // 零变更：静默
+
+          // 先落库（trace 追加）再发事件：客户端任何时点的收尾 refetch 与事件状态一致
+          await appendTraceCard(targetMsgId, card)
+          send({ type: 'card', id: undefined, card, agent_id: lastAssistantAgentId })
+        } catch (err) {
+          // done 已是终止事件，之后绝不能再发 error —— 只记日志
+          console.error('World state settlement failed:', (err as Error).message)
+        }
+      }
+
       // Helper: reload history from DB
       const reloadHistory = async (): Promise<ChatMessage[]> => {
         const allMsgs = await db.select().from(messages)
@@ -651,6 +710,11 @@ chatRoute.post('/', async (c) => {
 
       let currentHistory = history
       let currentPrompt: string | ContentPart[] = userMessage
+
+      // 每轮开始前重置「末条 assistant 消息」跟踪：suggestions 与状态结算都只挂本轮
+      lastAssistantMsgId = undefined
+      lastAssistantAgentId = undefined
+      lastAssistantHadSuggestions = false
 
       // First iteration always runs (even without infinite mode)
       if ((isGroup || isWorld) && groupAgentIds.length > 0) {
@@ -695,15 +759,20 @@ chatRoute.post('/', async (c) => {
         }
       }
 
-      // 非无限模式：本轮回复完成后，由中立 Agent 生成追问建议并补发
-      // （无限模式不生成 suggestions，追问由中立 Agent 的 follow_up 负责）
+      // 非无限模式：本轮回复完成后，由中立 Agent 生成追问建议并补发，同时进行
+      // 世界状态结算（两者独立、并行；结算仅在已定义状态的世界会话实际执行）
       if (!isInfinite) {
-        await generateAndSendSuggestions()
+        await Promise.all([generateAndSendSuggestions(), settleWorldState()])
       }
 
       // Infinite loop: continue while state says so
       while (isInfinite && checkInfinite()) {
         if (aborted) break
+
+        // 每轮开始前重置「末条 assistant 消息」跟踪（同上：结算只挂本轮）
+        lastAssistantMsgId = undefined
+        lastAssistantAgentId = undefined
+        lastAssistantHadSuggestions = false
 
         // Increment message count
         const state = infiniteState.get(convId)
@@ -759,6 +828,9 @@ chatRoute.post('/', async (c) => {
             break
           }
         }
+
+        // 世界会话：每轮结束后结算状态（下一轮的提示词与 follow_up 必须看到最新值）
+        await settleWorldState()
       }
 
       // Clean up infinite state

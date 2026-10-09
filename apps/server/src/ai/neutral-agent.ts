@@ -23,6 +23,8 @@ import {
   buildSuggestionsUserMessage,
   buildOrchestrationSystemPrompt,
   buildOrchestrationUserMessage,
+  buildWorldStateSettlementSystemPrompt,
+  buildWorldStateSettlementUserMessage,
 } from '../prompts/index.js'
 
 export interface GroupSkipHint {
@@ -114,6 +116,63 @@ export async function generateNeutralSuggestions(
     return suggestions.length > 0 ? suggestions : null
   } catch (err) {
     console.error('Neutral agent suggestions failed:', (err as Error).message)
+    return null
+  }
+}
+
+/** 世界状态结算条目（解析产物；成员/属性的存在性校验由调用方完成） */
+export interface WorldStateSettlementItem {
+  agentName: string
+  attribute: string
+  value: string
+  reason?: string
+}
+
+const MAX_SETTLEMENT_LINES = 30
+
+/**
+ * 世界状态结算：中立 Agent 以「世界裁决者」身份复核本轮叙事，输出应发生的状态变化
+ * （行格式 `成员 | 属性 | 新值 | 原因`，绝对值）。行级容错解析；失败/空 → null，
+ * 由调用方静默降级（失败开放，绝不打断主循环）。
+ */
+export async function generateWorldStateSettlement(
+  config: AppConfig,
+  agentModel: string,
+  conversationContext: string,
+  stateBlock: string,
+): Promise<WorldStateSettlementItem[] | null> {
+  try {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: buildWorldStateSettlementSystemPrompt() },
+      { role: 'user', content: buildWorldStateSettlementUserMessage({ context: conversationContext, stateBlock }) },
+    ]
+
+    let raw = ''
+    for await (const event of streamChatCompletion(config, agentModel, messages, [], false)) {
+      if (event.type === 'token' && event.text) raw += event.text
+    }
+
+    // 行级解析：容忍模型自发的围栏/bullet/编号/包裹引号；原因从第四段起并回「|」
+    const items: WorldStateSettlementItem[] = []
+    for (const line of raw.split('\n')) {
+      const s = line
+        .replace(/^```[a-z]*\s*/i, '')
+        .replace(/^[\s\-*\d.]+/, '')
+        .replace(/^["'「]|["'」]$/g, '')
+        .trim()
+      if (!s || s === '无') continue
+      const parts = s.split('|').map((p) => p.trim())
+      if (parts.length < 3) continue
+      const [agentName, attribute, value] = parts
+      const reason = parts.slice(3).join('|').trim()
+      if (!agentName || !attribute || !value) continue
+      items.push({ agentName, attribute, value, reason: reason || undefined })
+      if (items.length >= MAX_SETTLEMENT_LINES) break
+    }
+
+    return items.length > 0 ? items : null
+  } catch (err) {
+    console.error('World state settlement failed:', (err as Error).message)
     return null
   }
 }

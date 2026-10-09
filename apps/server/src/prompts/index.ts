@@ -37,9 +37,12 @@ export {
   buildSuggestionsUserMessage,
   buildOrchestrationSystemPrompt,
   buildOrchestrationUserMessage,
+  buildWorldStateSettlementSystemPrompt,
+  buildWorldStateSettlementUserMessage,
   FOLLOWUP_TARGETS,
   SUGGESTIONS_TARGETS,
   ORCHESTRATION_TARGETS,
+  WORLD_STATE_TARGETS,
 } from './fragments/neutral.js'
 
 // ---- 通知 ----
