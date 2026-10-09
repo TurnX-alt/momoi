@@ -284,6 +284,52 @@ describe('ui_form', () => {
   })
 })
 
+describe('ui_app', () => {
+  const exec = (input: Record<string, unknown>) => tool('ui_app').execute(input, ctx)
+
+  it('合法：html + js 产出描述符', async () => {
+    const r = await exec({
+      title: '计数器',
+      html: '<button id="b">0</button>',
+      js: 'let n=0;b.onclick=function(){b.textContent=++n;momoiResize()}',
+    })
+    expect(r.error).toBeUndefined()
+    const card = cardOf(r.data)
+    expect(card.component).toBe('app')
+    expect(card.title).toBe('计数器')
+    expect(r.summary).toContain('已渲染卡片：应用「计数器」')
+  })
+
+  it('超 64K 合计上限被拒绝并给精简指引（各字段单独合规）', async () => {
+    const r = await exec({
+      html: 'x'.repeat(40000),
+      css: 'y'.repeat(20000),
+      js: 'z'.repeat(20000),
+    })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('超过上限')
+    expect(r.summary).toContain('精简')
+  })
+
+  it('单字段超长先被通用长度校验拦截', async () => {
+    const r = await exec({ html: 'x'.repeat(65000) })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('长度不超过 64000')
+  })
+
+  it('html 缺失被拒绝', async () => {
+    const r = await exec({ css: 'body{}' })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('html: 必填字段缺失')
+  })
+
+  it('height 超范围被拒绝（通用 schema 校验）', async () => {
+    const r = await exec({ html: '<p>x</p>', height: 5000 })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('不能大于 960')
+  })
+})
+
 describe('catalog 一致性', () => {
   it('工具名与组件名一一对应且唯一', () => {
     const names = cardTools.map((t) => t.definition.name)

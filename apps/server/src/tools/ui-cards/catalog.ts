@@ -422,6 +422,44 @@ const formSpec: CardComponentSpec = {
   extraValidate: validateFormProps,
 }
 
+// ---- 沙箱逃生舱：自包含小应用 ----
+
+/** html + css + js 合计字符上限（D57）——超限工具级拒绝，引导模型精简 */
+const APP_SIZE_LIMIT = 64000
+
+function validateAppProps(props: Record<string, unknown>): string | null {
+  const total = (['html', 'css', 'js'] as const)
+    .map((k) => (typeof props[k] === 'string' ? (props[k] as string).length : 0))
+    .reduce((a, b) => a + b, 0)
+  if (total > APP_SIZE_LIMIT) {
+    return `html + css + js 合计 ${total} 字符，超过上限 ${APP_SIZE_LIMIT}——请精简（压缩内联数据、去掉冗余标记与注释）`
+  }
+  return null
+}
+
+const appSpec: CardComponentSpec = {
+  component: 'app',
+  toolName: 'ui_app',
+  label: '应用',
+  catalogLine: '应用卡片（AppBlock）——自包含 HTML/CSS/JS 小应用（小游戏/交互演示），隔离沙箱内运行',
+  description:
+    '渲染交互式小应用卡片：自包含的 HTML/CSS/JS 单页应用，在隔离沙箱中运行，可包含按钮、画布、动画、小游戏等任意交互。' +
+    'html 为页面主体（不含外层的 <html>/<body> 标签），css/js 可选（分别以内联 <style>/<script> 注入）；三者合计不超过 64000 字符。' +
+    '沙箱硬性限制：fetch/XHR/WebSocket 全部被阻断（**没有网络**）；无 localStorage/cookie；外部 CDN 脚本与样式不可用——' +
+    '所有逻辑与数据必须内联；图片可用 data: URL 或 https 直链。不要要求用户输入任何凭据或敏感信息。' +
+    '页面高度默认 320px，可经 height 指定（64-960）；JS 中调用 momoiResize() 可通知卡片自适应高度。' +
+    '适合：小游戏、交互演示、可视化玩具。图表/表格/表单请优先用对应的 ui_* 专用卡片。',
+  propsSchema: {
+    title: titleProp,
+    html: { type: 'string', minLength: 1, maxLength: 64000, description: '页面主体 HTML（不含 <html>/<body> 外层标签）' },
+    css: { type: 'string', maxLength: 32000, description: '附加 CSS（可选，以内联 <style> 注入）' },
+    js: { type: 'string', maxLength: 32000, description: '附加 JavaScript（可选，以内联 <script> 注入；momoiResize() 在此可用）' },
+    height: { type: 'integer', minimum: 64, maximum: 960, description: '初始高度 px（可选，默认 320）' },
+  },
+  required: ['html'],
+  extraValidate: validateAppProps,
+}
+
 // ---- 目录 ----
 
-export const cardCatalog: CardComponentSpec[] = [chartSpec, statSpec, tableSpec, diagramSpec, formSpec]
+export const cardCatalog: CardComponentSpec[] = [chartSpec, statSpec, tableSpec, diagramSpec, formSpec, appSpec]
