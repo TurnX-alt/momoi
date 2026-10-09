@@ -185,6 +185,7 @@
       "placeholder": "回答を入力してください..."
     },
     "card3dLoadFailed": "3D モデルの読み込みに失敗しました",
+    "card3dTimeout": "モデルの読み込みがタイムアウトしました——ネットワークを確認するか、モデルファイルを public/vrm/ に配置してください",
     "card3dUnsupported": "この環境では WebGL が利用できないため、3D モデルを表示できません",
     "cardActionBusy": "返答を生成中です。少し待ってからもう一度お試しください",
     "cardActionSummary": "カードを操作：{{label}}",

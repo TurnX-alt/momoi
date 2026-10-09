@@ -18,6 +18,25 @@ const MIN_HEIGHT = 240
 const MAX_HEIGHT = 640
 const D2R = Math.PI / 180
 const EMPTY_POSE: PoseDelta = {}
+/** 模型/动画加载超时（网络挂起时给出可行动的错误而非永久 spinner） */
+const MODEL_LOAD_TIMEOUT_MS = 20_000
+const TIMEOUT_SENTINEL = '__momoi_load_timeout__'
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(TIMEOUT_SENTINEL)), ms)
+    p.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(timer)
+        reject(e)
+      },
+    )
+  })
+}
 
 /** 内置示例模型：three-vrm 官方示例（VRM 1.0 样例）——零资产时仍可演示 */
 const DEFAULT_MODEL_URL =
@@ -74,7 +93,7 @@ type Status =
   | { kind: 'loading' }
   | { kind: 'ready' }
   | { kind: 'no-webgl' }
-  | { kind: 'load-failed'; message: string }
+  | { kind: 'load-failed'; message: string; messageKey?: string }
 
 export function CharacterCard({ props }: CardComponentProps) {
   const { t } = useTranslation()
@@ -198,7 +217,7 @@ export function CharacterCard({ props }: CardComponentProps) {
       loader.register((parser) => new VRMLoaderPlugin(parser))
       loader.register((parser) => new VRMAnimationLoaderPlugin(parser))
 
-      const gltf = await loader.loadAsync(data.modelUrl)
+      const gltf = await withTimeout(loader.loadAsync(data.modelUrl), MODEL_LOAD_TIMEOUT_MS)
       if (disposed) return
       const loadedVrm = (gltf.userData as { vrm?: VRM }).vrm
       if (!loadedVrm) throw new Error('文件不是有效的 VRM 模型')
@@ -235,7 +254,7 @@ export function CharacterCard({ props }: CardComponentProps) {
       // 动作动画（.vrma）：加载失败静默回落到 acts / 程序化 idle
       if (data.animationUrl) {
         try {
-          const animGltf = await loader.loadAsync(data.animationUrl)
+          const animGltf = await withTimeout(loader.loadAsync(data.animationUrl), MODEL_LOAD_TIMEOUT_MS)
           if (!disposed) {
             const vrmAnimation = (animGltf.userData as { vrmAnimations?: VRMAnimation[] }).vrmAnimations?.[0]
             if (vrmAnimation) {
@@ -278,7 +297,12 @@ export function CharacterCard({ props }: CardComponentProps) {
     raf = requestAnimationFrame(tick)
     load().catch((err) => {
       if (!disposed) {
-        setStatus({ kind: 'load-failed', message: err instanceof Error ? err.message : String(err) })
+        const isTimeout = err instanceof Error && err.message === TIMEOUT_SENTINEL
+        setStatus({
+          kind: 'load-failed',
+          message: isTimeout ? '' : err instanceof Error ? err.message : String(err),
+          messageKey: isTimeout ? 'chat.card3dTimeout' : undefined,
+        })
       }
     })
 
@@ -298,6 +322,11 @@ export function CharacterCard({ props }: CardComponentProps) {
         } catch {
           // noop
         }
+      }
+      try {
+        renderer?.forceContextLoss() // 确定性释放 WebGL 上下文（防多卡累积触发浏览器上限后旧卡变空白）
+      } catch {
+        // noop
       }
       try {
         renderer?.dispose()
@@ -327,7 +356,9 @@ export function CharacterCard({ props }: CardComponentProps) {
       {status.kind === 'load-failed' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center">
           <div className="text-xs text-destructive">{t('chat.card3dLoadFailed')}</div>
-          <div className="max-w-full break-all text-[11px] text-muted-foreground">{status.message}</div>
+          <div className="max-w-full break-all text-[11px] text-muted-foreground">
+            {status.messageKey ? t(status.messageKey) : status.message}
+          </div>
         </div>
       )}
       {data.caption && (

@@ -185,6 +185,7 @@
       "placeholder": "输入你的回答..."
     },
     "card3dLoadFailed": "3D 模型加载失败",
+    "card3dTimeout": "模型加载超时——请检查网络，或把模型文件放入 public/vrm/",
     "card3dUnsupported": "当前环境不支持 WebGL，无法显示 3D 模型",
     "cardActionBusy": "正在生成回复，请稍候再提交",
     "cardActionSummary": "与卡片交互：{{label}}",

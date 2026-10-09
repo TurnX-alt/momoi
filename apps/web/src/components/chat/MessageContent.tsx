@@ -48,10 +48,12 @@ export function MessageContent({ content, streaming, isUser }: MessageContentPro
     return () => clearTimeout(timer)
   }, [content, streaming])
 
-  const safeContent = useMemo(
-    () => sanitizeIncompleteMarkdown(renderedContent),
-    [renderedContent],
-  )
+  const safeContent = useMemo(() => {
+    // 防模型仿写：助手消息剥除系统标注行（[已渲染卡片：…]），历史注入格式
+    // 只该出现在回喂历史中——见 D59 防仿写
+    const cleaned = isUser ? renderedContent : stripCardMarkers(renderedContent)
+    return sanitizeIncompleteMarkdown(cleaned)
+  }, [renderedContent, isUser])
 
   // mermaid 围栏 + card-action 围栏（user 气泡内渲染为紧凑交互 chip）
   const parts = safeContent.split(/(```mermaid[\s\S]*?```|```card-action[\s\S]*?```)/g)
@@ -90,6 +92,18 @@ export function MessageContent({ content, streaming, isUser }: MessageContentPro
       })}
     </div>
   )
+}
+
+/**
+ * 剥除模型仿写的系统标注行（[已渲染卡片：…]，含流式未闭合残行）——
+ * 标注格式只该出现在回喂历史里；模型偶发在回复中复读它（历史注入格式的
+ * 已知副作用），剥除防文本污染。卡片本身仍只由工具调用产生。
+ */
+const CARD_MARKER_RE = /^[ \t]*[\[［]已渲染卡片[^\]］\n]*[\]］]?[ \t]*$/gm
+
+function stripCardMarkers(text: string): string {
+  if (!text.includes('已渲染卡片')) return text
+  return text.replace(CARD_MARKER_RE, '').replace(/\n{3,}/g, '\n\n')
 }
 
 /**
