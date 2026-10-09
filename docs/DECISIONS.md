@@ -1582,3 +1582,36 @@
 - `apps/web/src/components/cards/character/CharacterCard.tsx`（新）+ registry；`apps/web/public/vrm/README.md`（新）；i18n 三语 2 键
 - 依赖（web）：three / @pixiv/three-vrm / @pixiv/three-vrm-animation / @types/three
 - 测试：ui_character 五用例（合法 / 空参默认 / `..` 路径 / 权重越界 / 缺 name），server 257 全绿
+
+---
+
+## D59：3D 角色实时表演——语义手势库 + 姿态逃生舱、标准化骨骼一次编写全模型通用
+
+**日期**：2026-10-09
+
+**背景**：用户诉求——VRM 模型可预先提供，但**动作与台词应由 AI 实时演算**（不必为每个动作预先制作 `.vrma`）。台词自 D58 起已实时（`caption` 为每轮现写的 prop）；动作此前只能选现成 `.vrma` 文件。
+
+**决策**：
+1. `ui_character` 增 `acts`（≤8 个）——两种 act：`gesture`（从 **16 种语义手势库**选，配 at 起始秒 / times 重复）与 `pose`（**姿态逃生舱**：≤10 根骨骼欧拉角 ±135°、hold 保持秒数、`__root` 整体位移米）
+2. 手势在 **VRM 标准化人形骨骼**上程序化实现——一次编写、全模型通用；词汇表在 `shared/constants.ts` 单源（`CHARACTER_GESTURES` / `CHARACTER_POSE_BONES`），服务端 schema 枚举与前端 `Record<CharacterGesture, GestureDef>` 编译期穷尽互证
+3. 引擎语义：姿态 = 静止姿态 ∘ 欧拉增量，逐帧指数平滑趋近（进出场/段间切换自然软化）；同骨骼多段重叠后者覆盖；段外自动回归静止
+4. 优先级：`animation`（.vrma）> acts > 程序化 idle；**animation 加载失败回落 acts**（此前回落 idle）
+5. **面部朝向修正**：改用官方 `VRMUtils.rotateVRM0`（VRM0 转 +Z；VRM1 规范模型天生面向 +Z 为 no-op）——替换 D58 初版的手动 180° 旋转（该写法会让合规 VRM1 模型背对相机）
+6. 轴向符号集中于 `gestures.ts` 的 L/R 常量——个别非规范模型可一处翻转
+
+**原因**：
+- 模型没有视觉反馈，直接写骨骼/四元数是**全盲作画**（汇率算错能重算，姿势算错就是章鱼）；语义手势把"好看"的表演由前端一次性做对，模型只做语义编排
+- 结构上与整体设计**递归对称**：手势库 = 注册表（固定词汇保质量），pose / `.vrma` = 逃生舱（长尾定制）——用户明确采纳此双轨
+- 标准化骨骼是 VRM 规范的硬保证（合规模型骨骼名/坐标一致），"一次编写全模型通用"由此成立
+
+**备选与权衡**：
+- ❌ 仅原始姿态 DSL：盲写必然大面积不自然（用户选项中被否）
+- ❌ 仅手势库：长尾表演（特定剧情姿势）无出路（用户选择双轨）
+- ⚠️ 手势幅度/轴向按规范推导、**未经视觉校准**——常量集中可调，验收时按实物微调
+- ⚠️ 无 TTS 口型联动（用户本期选择不做）：caption 仅文字显示
+
+**影响**：
+- `packages/shared/src/constants.ts`：CHARACTER_GESTURES（16 种）+ CHARACTER_POSE_BONES（20 根 + `__root`）
+- `apps/server/src/tools/ui-cards/catalog.ts`：acts schema + 编排校验；golden 重生成
+- `apps/web/src/components/cards/character/gestures.ts`（新：手势库 + 时间轴引擎）；CharacterCard 表演层 + rotateVRM0 修正
+- 测试：ui_character +6 用例（手势编排 / 姿态 / 非法手势名 / 缺件分层 / times 误用 / 未知骨骼），server 263 全绿

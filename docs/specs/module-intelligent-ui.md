@@ -49,7 +49,7 @@
 | `ui_diagram` | diagram | `code`（Mermaid DSL） | 完整源码不含围栏标记；≤8000 字符 |
 | `ui_form` | form | `fields`（1-12 个字段） | 字段类型 text/number/textarea/select/multiselect/slider/checkbox/button-group；`name` 为回传键（字母下划线开头、唯一，pattern 约束）；select/multiselect/button-group 必填 `options`（2-8 个）且仅限这三类；min/max/step 仅 slider；提交后内容作为新用户消息回传；可选 `compute` 本地实时计算（D55，见〈本地实时计算〉） |
 | `ui_app` | app | `html` | 自包含 HTML/CSS/JS 单页应用（沙箱渲染）；html+css+js 合计 ≤64000 字符；`height` 64-960（默认 320）；无网络/无存储/无外部资源——全部内联（D57，见〈AppBlock 沙箱〉） |
-| `ui_character` | character | （全可选——省略 model 用内置示例） | VRM 模型（文件名 → `/vrm/<name>` 或 https 直链）；`.vrma` 动作动画；表情 `[{name, weight}]`（≤6，未知名称忽略）；`caption` 台词；`height` 240-640（默认 360）；路径禁 `..`（D58，见〈3D 角色卡〉） |
+| `ui_character` | character | （全可选——省略 model 用内置示例） | VRM 模型（文件名 → `/vrm/<name>` 或 https 直链）；`.vrma` 动作动画；表情 `[{name, weight}]`（≤6，未知名称忽略）；**acts 实时表演编排**（≤8：16 种语义手势 / 姿态逃生舱，D59）；`caption` 台词；`height` 240-640（默认 360）；路径禁 `..`（D58/D59，见〈3D 角色卡〉） |
 
 通用可选参数：`title`（≤60 字符）——执行时提取到 `CardDescriptor.title`（CardFrame 统一渲染），不留在 props。
 
@@ -131,9 +131,10 @@ interface CardDescriptor {
 
 - **资产约定**：`model` 为文件名（解析为 `/vrm/<name>`，物理位置 `apps/web/public/vrm/`，随构建拷贝、不入 git）或 https 直链；**省略时用 three-vrm 官方示例模型**——零资产开箱可用；`animation` 同理（`.vrma`）；路径含 `..` 拒绝
 - **分包**：three + @pixiv/three-vrm 静态内建于懒加载组件模块——**刻意不做 manualChunks**（Rolldown 依赖闭包吞噬教训见 D54）；`CharacterCard` 独立块 ~195KB gzip，无 3D 卡的会话永不加载
-- **动画优先级**：`.vrma` 加载成功 → AnimationMixer 循环播放；失败/缺省 → **程序化 idle**（正弦呼吸 + 微摆，零资产也有生命感）
+- **动画优先级（D59）**：`.vrma` 加载成功 → AnimationMixer 循环播放；失败/缺省 → **acts 实时表演**（有编排时）；再缺省 → 程序化 idle（正弦呼吸 + 微摆，零资产也有生命感）
+- **实时表演（D59）**：`acts`（≤8）——`type=gesture` 从**语义手势库**（16 种：wave 挥手 / nod 点头 / shake_head 摇头 / tilt_head 歪头 / bow 鞠躬 / clap 鼓掌 / shrug 耸肩 / think 思考 / point 指 / jump 蹦跳 / hands_on_hips 叉腰 / shy 害羞 / salute 敬礼 / heart 比心 / dance 律动 / stretch 伸懒腰）选，配 `at`（起始秒，默认接续）与 `times`（重复 ≤5）；`type=pose` 为**姿态逃生舱**（≤10 骨骼欧拉角 ±135°、`hold` 保持秒数、`__root` 整体位移米）。手势在 **VRM 标准化人形骨骼**上程序化实现——一次编写、全模型通用；词汇表单源于 `shared/constants.ts`（服务端 schema 枚举与前端实现编译期穷尽互证）。引擎：姿态 = 静止姿态 ∘ 欧拉增量，逐帧指数平滑趋近（进出场与段间切换自然软化），段外自动回归静止；轴向符号集中于 `gestures.ts` 的 L/R 常量（校准入口）
 - **表情**：`expression: [{name, weight}]`（≤6）——依模型预设（happy/angry/sad/relaxed 等），未知名称静默忽略
-- **自动取景**：按模型包围盒计算相机距离与目标点；VRM 面向 -Z，转 180° 面向相机
+- **自动取景**：按模型包围盒计算相机距离与目标点；朝向用官方 `VRMUtils.rotateVRM0`（VRM0 转 +Z；VRM1 规范模型天生面向 +Z，为 no-op）
 - **降级三级**：WebGL 探测失败 → 内联提示；模型加载失败 → 局部错误视图（含原因）；动画失败只 warn 回落到 idle
 - **性能与生命周期**：DPR 上限 2；`IntersectionObserver` 离屏暂停 RAF；卸载 `VRMUtils.deepDispose` + `renderer.dispose`；主题切换不重建（透明背景自然适配明暗）
 - **交互**：v1 无轨道控制/拖拽（避免与页面滚动与触摸手势冲突）
@@ -185,6 +186,7 @@ interface CardDescriptor {
 - **M3（已实装，D56 反转）**：IM 渠道（微信/QQ）对卡片完全无感——工具表无 ui_*、系统提示无卡片目录、历史无卡片摘要；卡片的渠道语义为「仅网页版」；网页版全量能力不受影响
 - **M4（已实装）**：自包含 HTML 计数器可交互 + 自动高度；外部 fetch 被 CSP 阻断（devtools 验证）；>64KB 拒绝并自修复精简；明暗主题切换正确；消息卸载 iframe 销毁
 - **M5（已实装）**：VRM 模型加载 + 表情/动画生效；缺省程序化 idle；无 WebGL 优雅降级；模型加载失败局部错误视图；three chunk（~195KB gzip）仅 3D 卡首次渲染拉取——默认示例模型可零资产验收
+- **D59 增量**：`acts` 手势编排实时演出（如「先挥手再歪头」可肉眼验证）；`.vrma` 失败回落 acts；姿态逃生舱可给出自定义姿势（幅度保守、不自然时以手势代替）；模型面向相机（rotateVRM0 修正后可验证）
 
 ## 预留错误码（不注册进 errors.ts，启用时再登记）
 
