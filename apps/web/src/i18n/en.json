@@ -184,6 +184,13 @@
       "submit": "Submit",
       "placeholder": "Type your answer..."
     },
+    "cardActionBusy": "The assistant is still replying — try again shortly",
+    "cardActionSummary": "Interacted with a card: {{label}}",
+    "cardActionSummaryNamed": "Interacted with card \"{{title}}\": {{label}}",
+    "cardFormRequired": "Please fill in the required fields",
+    "cardFormSelectPlaceholder": "Select…",
+    "cardFormSubmit": "Submit",
+    "cardFormSubmitted": "Submitted",
     "cardRenderFailed": "Card failed to render",
     "cardTableEmpty": "No data",
     "cardUnsupported": "Unsupported card type: {{component}}",

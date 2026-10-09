@@ -80,7 +80,7 @@ export const MessageBubble = React.memo(function MessageBubble({ message, onSugg
           {/* Trace-driven rendering: thinking + tool calls + text in chronological order. */}
           {!isUser && message.trace && message.trace.length > 0 ? (
             <>
-              {groupAndRenderTrace(message.trace, message.streaming, verbose)}
+              {groupAndRenderTrace(message.trace, message.streaming, verbose, agentName)}
             </>
           ) : !isUser ? (
             /* Streaming placeholder — content not yet arrived */
@@ -219,7 +219,7 @@ export const MessageBubble = React.memo(function MessageBubble({ message, onSugg
 })
 
 /** Group consecutive tool_call entries into stacks; render trace with verbose-controlled thinking. */
-function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?: boolean): React.ReactNode {
+function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?: boolean, agentName?: string | null): React.ReactNode {
   const elements: React.ReactNode[] = []
   // 已被卡片事件「认领」的工具调用 id（ui_* 工具声明）：卡片即其 UI 表示，
   // 对应 tool_call 条目不再进工具栈；校验失败（无卡片）时照常显示错误条目。
@@ -261,7 +261,7 @@ function groupAndRenderTrace(trace: TraceEntry[], streaming?: boolean, verbose?:
       )
       i++
     } else if (entry.type === 'card') {
-      elements.push(<CardRenderer key={`card-${entry.id ?? i}`} card={entry.card} />)
+      elements.push(<CardRenderer key={`card-${entry.id ?? i}`} card={entry.card} cardId={entry.id} ownerAgentName={agentName ?? undefined} />)
       i++
     } else {
       // text

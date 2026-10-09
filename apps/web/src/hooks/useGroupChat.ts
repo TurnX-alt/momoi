@@ -4,8 +4,12 @@
 // ============================================================
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useChat } from './useChat'
 import { api } from '../lib/api'
+import { useToast } from '../components/ui/toast'
+import { setCardActionHandler } from '../components/cards/cardInteractionStore'
+import { composeCardActionMessage } from '../lib/cardAction'
 import type { Conversation } from '@momoi/shared/types'
 interface AgentBrief {
   id: string
@@ -15,6 +19,8 @@ interface AgentBrief {
 
 export function useGroupChat() {
   const chat = useChat()
+  const { t } = useTranslation()
+  const { toast } = useToast()
   // v7 exhaustive-deps：闭包内经 chat.fn() 成员链「调用」时要求把根对象列入
   // deps——而 chat 每渲染都是新对象，useCallback 会形同虚设。useChat 的函数
   // 成员均逐个 useCallback（引用稳定），解构为裸标识符后规则与 memo 两全。
@@ -30,6 +36,7 @@ export function useGroupChat() {
     refreshConversations,
     sendMessage,
     revertMessage,
+    loading,
   } = chat
   const [groupAgents, setGroupAgents] = useState<AgentBrief[]>([])
   const [isGroupMode, setIsGroupMode] = useState(false)
@@ -258,6 +265,36 @@ export function useGroupChat() {
     const agentIds = groupAgents.map((a) => a.id)
     await sendMessage(text, thinkingMode, attachments, null, true, agentIds, infiniteMode)
   }, [sendMessage, groupAgents])
+
+  // 卡片交互回流（M2）：FormCard 的提交经模块级 handler 合成 card-action 协议
+  // 消息，走既有发送链路（群聊/世界经编排、单聊直达）。生成中不受理并轻提示
+  // ——sendMessage 的同会话串行锁会静默丢弃；返回 false 让调用方不标记已消费。
+  useEffect(() => {
+    setCardActionHandler((ev) => {
+      if (!ev.cardId) return false
+      if (loading) {
+        toast({ title: t('chat.cardActionBusy'), variant: 'info' })
+        return false
+      }
+      const label = ev.label ?? ev.action
+      const summary = ev.cardTitle
+        ? t('chat.cardActionSummaryNamed', { title: ev.cardTitle, label })
+        : t('chat.cardActionSummary', { label })
+      const composed = composeCardActionMessage(summary, {
+        v: 1,
+        card_id: ev.cardId,
+        component: ev.component,
+        action: ev.action,
+        label: ev.label,
+        payload: ev.payload,
+      })
+      const text = ev.ownerAgentName && isGroupMode ? `@${ev.ownerAgentName} ${composed}` : composed
+      if (isGroupMode) void sendGroupMessage(text, true)
+      else void sendMessage(text, true)
+      return true
+    })
+    return () => setCardActionHandler(null)
+  }, [loading, isGroupMode, sendGroupMessage, sendMessage, t, toast])
 
   // 强制合规重试（群聊版）：回退 → 以 force_compliance 重发群聊消息。
   // 命名带 Group 后缀：此处返回值经 {...chat, ...} 合并后直接被 App 使用，

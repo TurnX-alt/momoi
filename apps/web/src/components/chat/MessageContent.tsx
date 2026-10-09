@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, lazy, Suspense } from 'react'
 import { MermaidBlock } from './MermaidBlock'
+import { CardActionChip } from './CardActionChip'
+import { parseCardActionFence } from '../../lib/cardAction'
 
 // Lazy-load the markdown renderer at the COMPONENT level: MarkdownView
 // statically imports react-markdown + remark-gfm, so the ~39 KB (gzip)
@@ -51,7 +53,8 @@ export function MessageContent({ content, streaming, isUser }: MessageContentPro
     [renderedContent],
   )
 
-  const parts = safeContent.split(/(```mermaid[\s\S]*?```)/g)
+  // mermaid 围栏 + card-action 围栏（user 气泡内渲染为紧凑交互 chip）
+  const parts = safeContent.split(/(```mermaid[\s\S]*?```|```card-action[\s\S]*?```)/g)
 
   return (
     <div className={`prose prose-sm max-w-none [&_p]:my-1.5 [&>:first-child]:mt-0 [&>:last-child]:mb-0 ${isUser ? '[color:inherit] [--tw-prose-body:currentColor] [--tw-prose-headings:currentColor] [--tw-prose-bold:currentColor] [--tw-prose-links:currentColor] [--tw-prose-code:currentColor] [--tw-prose-counters:currentColor] [--tw-prose-bullets:currentColor] [--tw-prose-quotes:currentColor]' : 'dark:prose-invert'}`}>
@@ -62,6 +65,20 @@ export function MessageContent({ content, streaming, isUser }: MessageContentPro
           }
           const chart = part.replace(/```mermaid\n?/, '').replace(/\n?```$/, '')
           return <MermaidBlock key={idx} chart={chart} />
+        }
+        if (part.startsWith('```card-action')) {
+          if (isUser) {
+            const payload = parseCardActionFence(part)
+            if (payload) {
+              return (
+                <div key={idx}>
+                  <CardActionChip payload={payload} />
+                </div>
+              )
+            }
+          }
+          // 非 user 或解析失败：原样展示（调试友好）
+          return <pre key={idx} className="text-xs bg-muted p-2 rounded overflow-x-auto">{part}</pre>
         }
         if (!part) return null
         const processed = processMentions(part)

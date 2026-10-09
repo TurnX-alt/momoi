@@ -5,6 +5,12 @@ import type { CardComponent } from '@momoi/shared/types'
 /** 卡片组件统一收参：描述符中的 props（服务端已校验，前端只做防崩轻校验） */
 export interface CardComponentProps {
   props: Record<string, unknown>
+  /** 卡片对位 ID（trace 条目的工具调用 id）——交互类卡片回传用 */
+  cardId?: string
+  /** 卡片标题（CardRenderer 传入，交互回传摘要用） */
+  cardTitle?: string
+  /** 群聊：卡片所属 Agent 名（交互回传 @ 前缀置首发言） */
+  ownerAgentName?: string
 }
 
 export interface CardRegistration {
@@ -38,5 +44,9 @@ export const cardRegistry: Partial<Record<CardComponent, CardRegistration>> = {
   diagram: {
     title: 'diagram',
     Component: lazy(() => import('./diagram/DiagramCard').then((m) => ({ default: m.DiagramCard }))),
+  },
+  form: {
+    title: 'form',
+    Component: lazy(() => import('./form/FormCard').then((m) => ({ default: m.FormCard }))),
   },
 }
