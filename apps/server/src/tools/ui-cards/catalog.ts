@@ -235,6 +235,108 @@ const diagramSpec: CardComponentSpec = {
   required: ['code'],
 }
 
+// ---- 交互：表单 ----
+
+const formFieldSchema: ToolSchemaProperty = {
+  type: 'object',
+  required: ['type', 'name', 'label'],
+  properties: {
+    type: {
+      type: 'string',
+      enum: ['text', 'number', 'textarea', 'select', 'multiselect', 'slider', 'checkbox', 'button-group'],
+      description: '字段类型',
+    },
+    name: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 40,
+      pattern: '^[A-Za-z_][A-Za-z0-9_]*$',
+      description: '字段标识（回传表单值的键；字母/下划线开头，字母数字下划线组成，须唯一）',
+    },
+    label: { type: 'string', minLength: 1, maxLength: 40, description: '显示标签' },
+    required: { type: 'boolean', description: '是否必填（默认 false）' },
+    placeholder: { type: 'string', maxLength: 60, description: '占位提示（text/number/textarea）' },
+    options: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 8,
+      description: '选项（select/multiselect/button-group 必填；其它类型不可携带）',
+      items: {
+        type: 'object',
+        required: ['label'],
+        properties: {
+          label: { type: 'string', minLength: 1, maxLength: 40, description: '选项显示文本' },
+          value: { type: 'string', maxLength: 40, description: '选项回传值（可选；缺省用 label）' },
+        },
+      },
+    },
+    min: { type: 'number', description: '最小值（仅 slider）' },
+    max: { type: 'number', description: '最大值（仅 slider）' },
+    step: { type: 'number', description: '步长（仅 slider，默认 1）' },
+  },
+}
+
+function validateFormProps(props: Record<string, unknown>): string | null {
+  const errs: string[] = []
+  const fields = props.fields as Array<Record<string, unknown>>
+  const names = new Set<string>()
+
+  for (const f of fields) {
+    const name = f.name as string
+    const type = f.type as string
+    if (names.has(name)) errs.push(`字段名 "${name}" 重复——name 必须唯一`)
+    names.add(name)
+
+    const optionsTypes = type === 'select' || type === 'multiselect' || type === 'button-group'
+    if (optionsTypes && !f.options) {
+      errs.push(`字段 "${name}"（${type}）必须提供 options（2-8 个）`)
+    }
+    if (!optionsTypes && f.options) {
+      errs.push(`字段 "${name}"（${type}）不支持 options——options 仅用于 select/multiselect/button-group`)
+    }
+    const sliderTypes = type === 'slider'
+    if (!sliderTypes && (f.min !== undefined || f.max !== undefined || f.step !== undefined)) {
+      errs.push(`字段 "${name}"（${type}）不支持 min/max/step——仅用于 slider`)
+    }
+    if (sliderTypes) {
+      if (typeof f.min === 'number' && typeof f.max === 'number' && f.min >= f.max) {
+        errs.push(`字段 "${name}" 的 min（${f.min}）必须小于 max（${f.max}）`)
+      }
+      if (typeof f.step === 'number' && f.step <= 0) {
+        errs.push(`字段 "${name}" 的 step 必须大于 0`)
+      }
+    }
+  }
+  return errs.length ? errs.join('；') : null
+}
+
+const formSpec: CardComponentSpec = {
+  component: 'form',
+  toolName: 'ui_form',
+  label: '表单',
+  catalogLine: '表单卡片（文本/数字/下拉/多选/滑块等字段）——向用户收集结构化输入，提交后内容自动回传',
+  description:
+    '渲染表单卡片：向用户收集若干字段（1-12 个），用户填写提交后，其内容会作为一条新消息回传给你继续处理。' +
+    'name 是回传值的键（字母/下划线开头，须唯一）；字段类型 text/number/textarea 自由输入，' +
+    'select/multiselect/button-group 必须提供 options（2-8 个），slider 可用 min/max/step，checkbox 为开关。' +
+    '何时用：需要用户输入多个参数、做选择题、确认配置时——表单能保证回传到结构化取值，优于在正文里列问题让用户自由回复。' +
+    '何时不用：只有一个简单问题用正文询问即可。',
+  propsSchema: {
+    title: titleProp,
+    description: { type: 'string', maxLength: 200, description: '表单说明（可选，显示在字段上方）' },
+    fields: {
+      type: 'array',
+      items: formFieldSchema,
+      minItems: 1,
+      maxItems: 12,
+      description: '字段列表（1-12 个）',
+    },
+    submitLabel: { type: 'string', maxLength: 20, description: '提交按钮文案（可选，默认「提交」）' },
+  },
+  required: ['fields'],
+  extraValidate: validateFormProps,
+}
+
 // ---- 目录 ----
 
-export const cardCatalog: CardComponentSpec[] = [chartSpec, statSpec, tableSpec, diagramSpec]
+export const cardCatalog: CardComponentSpec[] = [chartSpec, statSpec, tableSpec, diagramSpec, formSpec]

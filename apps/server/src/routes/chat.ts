@@ -5,6 +5,7 @@ import fs from 'fs'
 import { db, conversations, messages, groupConversationAgents, worlds } from '../db/index.js'
 import { eq, and, count, sql, desc } from 'drizzle-orm'
 import { runPiAgentLoop } from '../ai/pi-adapter.js'
+import { augmentRowsWithCards } from '../ai/history-cards.js'
 import { orchestrateGroupChat } from '../ai/group-orchestrator.js'
 import { generateNeutralFollowUp, generateNeutralSuggestions } from '../ai/neutral-agent.js'
 import { persistConversationStats } from '../lib/stats-store.js'
@@ -314,9 +315,9 @@ chatRoute.post('/', async (c) => {
         .orderBy(messages.created_at)
         .all()
 
-      const history: ChatMessage[] = historyMsgs
-        .slice(0, -1) // remove current user message
-        .map((m: typeof messages.$inferSelect) => ({
+      const history: ChatMessage[] = augmentRowsWithCards(
+        historyMsgs.slice(0, -1), // remove current user message
+      ).map((m: typeof messages.$inferSelect) => ({
           role: m.role as ChatMessage['role'],
           content: m.content,
           tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
@@ -604,7 +605,7 @@ chatRoute.post('/', async (c) => {
         const allMsgs = await db.select().from(messages)
           .where(eq(messages.conversation_id, convId))
           .orderBy(messages.created_at).all()
-        return allMsgs.slice(0, -1).map((m: typeof messages.$inferSelect) => ({
+        return augmentRowsWithCards(allMsgs.slice(0, -1)).map((m: typeof messages.$inferSelect) => ({
           role: m.role as ChatMessage['role'],
           content: m.content,
           tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,

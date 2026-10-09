@@ -162,6 +162,66 @@ describe('ui_diagram', () => {
   })
 })
 
+describe('ui_form', () => {
+  const exec = (input: Record<string, unknown>) => tool('ui_form').execute(input, ctx)
+
+  it('合法：多类型字段产出描述符', async () => {
+    const r = await exec({
+      title: '项目配置',
+      description: '请填写以下参数',
+      fields: [
+        { type: 'text', name: 'project', label: '项目名', required: true, placeholder: '如 momoi' },
+        { type: 'select', name: 'db', label: '数据库', options: [{ label: 'SQLite' }, { label: 'PostgreSQL', value: 'pg' }] },
+        { type: 'slider', name: 'budget', label: '预算（万）', min: 0, max: 100, step: 5 },
+        { type: 'multiselect', name: 'mods', label: '功能模块', options: [{ label: 'A' }, { label: 'B' }] },
+      ],
+      submitLabel: '创建',
+    })
+    expect(r.error).toBeUndefined()
+    const card = cardOf(r.data)
+    expect(card.component).toBe('form')
+    expect(card.title).toBe('项目配置')
+    expect((card.props as { fields: unknown[] }).fields).toHaveLength(4)
+    expect(r.summary).toContain('已渲染卡片：表单「项目配置」')
+  })
+
+  it('select 缺 options 被拒绝', async () => {
+    const r = await exec({ fields: [{ type: 'select', name: 's', label: 'S' }] })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('必须提供 options')
+  })
+
+  it('字段名重复被拒绝', async () => {
+    const r = await exec({
+      fields: [
+        { type: 'text', name: 'a', label: 'A' },
+        { type: 'text', name: 'a', label: 'B' },
+      ],
+    })
+    expect(r.summary).toContain('"a" 重复')
+  })
+
+  it('slider 的 min 不小于 max 被拒绝', async () => {
+    const r = await exec({ fields: [{ type: 'slider', name: 'x', label: 'X', min: 10, max: 5 }] })
+    expect(r.summary).toContain('必须小于')
+  })
+
+  it('非 options 类型携带 options / 非 slider 携带 min 被拒绝', async () => {
+    const r1 = await exec({
+      fields: [{ type: 'text', name: 'a', label: 'A', options: [{ label: 'x' }, { label: 'y' }] }],
+    })
+    expect(r1.summary).toContain('不支持 options')
+    const r2 = await exec({ fields: [{ type: 'text', name: 'a', label: 'A', min: 1 }] })
+    expect(r2.summary).toContain('仅用于 slider')
+  })
+
+  it('name 非法标识符被通用 pattern 校验拦截', async () => {
+    const r = await exec({ fields: [{ type: 'text', name: '1bad', label: 'A' }] })
+    expect(r.error).toBe(true)
+    expect(r.summary).toContain('不匹配格式')
+  })
+})
+
 describe('catalog 一致性', () => {
   it('工具名与组件名一一对应且唯一', () => {
     const names = cardTools.map((t) => t.definition.name)
