@@ -1619,3 +1619,37 @@
 **实装后修正（2026-10-09，同批）**：
 - **标注行仿写**：M2 的历史注入格式 `[已渲染卡片：…]` 被模型在回复中复读（往历史注入格式=教会了句式；与 suggestions 围栏被自发输出同源）——模型写标注 ≠ 调工具，表现为"卡片概率性不渲染 + 文本污染"。修复双保险：`chat/ui-cards` 片段明令禁止自写该格式（golden 重生成）+ `MessageContent` 渲染前剥除标注行（助手消息，含流式未闭合残行与全角变体；对已落库消息同样生效）
 - **3D 卡加固**：清理补 `forceContextLoss()`（确定性释放 WebGL 上下文，防多卡累积触发浏览器上限后旧卡变空白）；模型/动画加载加 20s 超时（网络挂起给出可行动的错误而非永久 spinner，错误含 `chat.card3dTimeout` 指引）
+
+---
+
+## D60：世界模拟角色状态——定义/值双 JSON 列、update_state 工具与轮末中立结算双轨、第 8 卡型 'state'
+
+**日期**：2026-10-09
+
+**背景**：世界模拟此前只有法则一个可变维度，无法承载「发生在世界中的事件」留下的持续性痕迹。用户需求：世界中的每个 Agent 携带贯穿会话的状态（生命值、精神健康值、体温…），**默认没有任何状态**；状态独立于法则；创建世界与编辑世界时可定义/修改；会话推进中随事件变化。
+
+**决策**：
+1. **存储**：worlds 增 `states`（定义 JSON `[{name, default, description}]`）与 `state_values`（`{agentId: {属性名: 值}}`）两个可空 JSON 列；双方言幂等迁移（sqlite ALTER 无 DEFAULT，NULL 由 lib 统一容错，跟随 stats 先例）。默认值仅用于初始化；读取时以「对账视图」呈现（按成员过滤 + 缺属性补默认）；编辑定义 = 全量替换 + 就地持久对账；成员增删懒对账（存储保留、读取过滤——重新加回即恢复）
+2. **变更双轨（用户拍板「两者都要」）**：角色 Agent 经 `update_state` 工具即时修改（自己/他人，绝对新值）；轮末中立 Agent 以「世界裁决者」身份复核补结算（可修正夸张改动）。两侧共用 `lib/world-state.ts` 的 `applyChanges`（no-op 静默、落库、构建变更卡）
+3. **呈现**：CardComponent 首增第 8 种 `'state'`（专用渲染：成员/属性/旧值→新值/原因；方向箭头仅数值可解析时展示且**保持中性**——属性语义因名字而异，升绿降红会误读）；〈引擎合成卡〉成为卡片体系第二个来源（不经 catalog / 无 ui_* 工具 / 无 card-action）；update_state 工具与轮末结算共用同一卡片形态
+4. **提示词**：新片段 `chat/world-state`（scene 层，states 非空时注入：定义 + 全员当前值 + 行为规则）+ 新配方 `neutral.world-state.*`（世界裁决者；刻意**不接额外指示**以保结构化输出）；编排器每 Agent 重取运行态快照 + ToolContext 注入状态句柄（同轮新鲜度）
+5. **可见性**：全员可见（每个 Agent 提示词注入全体成员当前值）
+6. **行为边界**：默认无状态 = 零行为变化（片段/工具/结算/卡片全部不出现；既有黄金快照逐字不变）；IM 渠道无关（无世界入口）；值统一为显示字符串（TypeBox 层不支持联合类型；≤60 字符、单行、禁「|」护结算行解析）
+
+**原因**：
+- 「即时性 vs 一致性」的分工：角色工具负责事件发生时的即时性；轮末裁决负责「世界事实」的兜底与合理性（旁观者能看到全局，局中角色各自看不到）——双轨互为补充而非重复
+- 卡片是状态系统的 **UI 契约而非模型可选项**：引擎合成保证「有变化必有卡」，不依赖模型自觉制卡（模型工具覆盖不了轮末结算的展示）
+- 两个 JSON 列而非关系表：读取处处整取整写、单写者（工具与结算串行）、生命周期与会话同行——与 `conversations.stats` 同款立场
+
+**备选与权衡**：
+- ❌ 仅工具（轮末无兜底、环境性变化无人认领）/ ❌ 仅轮末（事件发生时无即时反馈）/ ❌ `ui_state` 模型工具（模型负担 + 与引擎合成重复）——用户选项中被否
+- ⚠️ 无限模式每轮多一次中立 LLM 调用（结算）——仅状态非空的世界承担；失败开放
+- ⚠️ 属性改名 = 删 + 建、值重置（无稳定 attr id）——spec 显式写明，接受
+- ⚠️ 旧客户端遇未知 `'state'` 组件走既有 cardUnsupported 错误态（不崩）
+
+**影响**：
+- server：db ×5（ddl / sqlite / pg / schema ×2）、`lib/world-state.ts`（新）、routes/worlds + routes/chat、`tools/world-state-tool.ts`（新）+ tools/types、ai/pi-adapter + group-orchestrator + neutral-agent、prompts（fragments/chat + fragments/neutral + registry + index + preview）
+- shared：`WorldStateDef` / `WorldStateValues` / `WorldStateRuntime` / `WorldStateRow` / `WorldStatePromptView`、WorldInfo 扩展、CardComponent + `'state'`、错误码 ×2（WORLD_STATES_INVALID / WORLD_STATE_VALUE_INVALID，基线 154→156）
+- web：cards/state/StateCard（新）+ registry、sidebar/WorldStatesFields（新）+ LawsEditor 重构（双分页 + 当前值手动修正）+ NewWorkflowDialog、hooks（useChat / useGroupChat 的草稿链路与 realtime:world_state 刷新）、api、i18n 三语
+- 测试：`world-state.test.ts`（12 用例）、preview +2、golden +3（world-with-states / neutral.world-state.*）、`scripts/test-world-state-e2e.ts`（19 断言）
+- 详见 `docs/specs/module-world.md`

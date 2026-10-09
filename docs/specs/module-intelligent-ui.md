@@ -2,11 +2,11 @@
 
 ## 概述
 
-生成式卡片（Intelligent UI）让模型在聊天流中直接渲染**交互式 UI 组件**（图表、统计卡、表格、流程图，后续扩展表单、沙箱应用、3D 角色），而非仅输出纯文本。采用业界通用的 **Chat Components 范式**：模型经 `ui_*` 工具调用声明卡片（组件名 + 结构化 props，schema 约束）→ 服务端校验并捕获 → SSE `card` 事件推送 + `messages.trace` 持久化 → 前端组件注册表懒加载渲染。范式选择与全部设计决策见 `DECISIONS.md` D54。
+生成式卡片（Intelligent UI）让模型在聊天流中直接渲染**交互式 UI 组件**（图表、统计卡、表格、流程图，后续扩展表单、沙箱应用、3D 角色），而非仅输出纯文本。采用业界通用的 **Chat Components 范式**：模型经 `ui_*` 工具调用声明卡片（组件名 + 结构化 props，schema 约束）→ 服务端校验并捕获 → SSE `card` 事件推送 + `messages.trace` 持久化 → 前端组件注册表懒加载渲染。范式选择与全部设计决策见 `DECISIONS.md` D54；世界状态的 `state` 卡为**引擎合成**的第二来源（见〈引擎合成卡〉，D60）。
 
 **与 markdown 输出的关系**：卡片是 markdown 的补充而非替代——能用一两句话讲清的内容不制卡（片段中有明确指引）；diagram 卡收编既有 mermaid 能力（DSL 原样保留，仅换进料通道，渲染器共享）。
 
-**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入，已实装）；M3 = IM 渠道结构性关闭卡片（网页版专属，已实装，D56）；M4 = 沙箱逃生舱（app，已实装，D57）；M5 = 3D 角色卡（character，已实装，D58）。**全部里程碑已实装。**
+**分期**：M1 = 协议核心 + chart/stat/table/diagram（已实装）；M2 = 交互闭环（form + card-action + 历史注入，已实装）；M3 = IM 渠道结构性关闭卡片（网页版专属，已实装，D56）；M4 = 沙箱逃生舱（app，已实装，D57）；M5 = 3D 角色卡（character，已实装，D58）；M6 = 世界状态引擎合成卡（state，已实装，D60）。**全部里程碑已实装。**
 
 **渠道边界**：生成式卡片**仅限网页版**——IM 渠道（微信/QQ）以 `uiCards: false` 运行，模型对卡片完全无感（D56）。
 
@@ -25,7 +25,7 @@
 | `apps/web/src/components/cards/registry.ts` | 组件注册表：`CardComponent` → 懒加载组件映射 |
 | `apps/web/src/components/cards/CardRenderer.tsx` | 渲染入口：查表 + Suspense + 局部错误边界（memo） |
 | `apps/web/src/components/cards/CardFrame.tsx` | 统一外壳：圆角边框卡 + 可选标题，`max-w-2xl` |
-| `apps/web/src/components/cards/{chart,stat,table,diagram,form,app,character}/` | 七类组件实现（chart 含 `palette.ts` 双模式色板） |
+| `apps/web/src/components/cards/{chart,stat,table,diagram,form,app,character,state}/` | 八类组件实现（chart 含 `palette.ts` 双模式色板） |
 | `apps/web/public/vrm/` | VRM 模型/动作资产目录（文件名为卡片引用键；大文件不入 git） |
 | `apps/web/src/components/chat/MermaidBlock.tsx` | Mermaid 渲染共享块（markdown 围栏路径 + diagram 卡 `bare` 模式） |
 | `apps/web/src/components/chat/MessageBubble.tsx` | `groupAndRenderTrace` card 分支；ui_* 工具条目被卡片认领后不进工具栈 |
@@ -36,6 +36,8 @@
 ## 接口契约
 
 ### ui_* 工具面（M1-M5：7 个）
+
+> `state`（世界状态引擎合成卡）无 ui_* 工具——见〈引擎合成卡（第二来源）〉。
 
 **仅网页版暴露**（D56）——IM 渠道以 `uiCards: false` 运行，ui_* 工具被结构性剔除、卡片目录片段不注入。
 
@@ -139,11 +141,26 @@ interface CardDescriptor {
 - **性能与生命周期**：DPR 上限 2；`IntersectionObserver` 离屏暂停 RAF；卸载 `VRMUtils.deepDispose` + `renderer.dispose`；主题切换不重建（透明背景自然适配明暗）
 - **交互**：v1 无轨道控制/拖拽（避免与页面滚动与触摸手势冲突）
 
+### 引擎合成卡（第二来源：世界状态，D60）
+
+`state` 卡不由模型经 ui_* 工具声明，而由世界状态系统**引擎合成**——两个来源：
+
+1. `update_state` 工具成功时返回 `data.card`（语义工具携带卡片，走既有 `tool_execution_end` 捕获链路；工具条目被卡片认领隐藏——认领按 id 匹配、与工具名无关）
+2. 轮末状态结算由服务端**直接构建描述符**：`{type:'card', id:undefined}` 追加到末条 assistant 消息 trace + 发 `card` SSE（先落库再发事件），`agent_id` = 本轮最后发言者
+
+契约：
+
+- `props: { changes: [{agent, attribute, from, to, reason?}] }`（全字符串）；`title`「状态变化」（工具）/「状态结算」（轮末）
+- **只读**（不接 card-action；`id` 缺省不参与交互对位；渲染 key 回退已覆盖）
+- **不在 catalog** / 不注入 `chat/ui-cards` 目录 / 无 ui_* 工具；渲染走同一注册表与重放链路（trace → 刷新/多设备确定性恢复）
+- **防仿写边界延伸**：模型可能看到 `[已渲染卡片：state「…」]` 标注（历史注入同构），`chat/world-state` 片段明令禁止自写；结算不要求模型输出卡片 JSON（引擎合成）
+- 完整语义（双轨变更、结算流程、存储）见 [module-world.md](./module-world.md)
+
 ## 行为约束
 
 ### 服务端
 
-1. **捕获点唯一**：卡片仅在 `createEventEmitter` 的 `tool_execution_end` 分支捕获（`details.data.card`）——trace 与 SSE 同一处产出，避免双源漂移
+1. **捕获点唯一**：卡片仅在 `createEventEmitter` 的 `tool_execution_end` 分支捕获（`details.data.card`）——trace 与 SSE 同一处产出，避免双源漂移（例外：世界状态的**引擎合成卡**由服务端直接构建并追加 trace/SSE——见〈引擎合成卡〉，D60）
 2. **事件顺序保证**：`card` 事件必定先于同 id 的 `tool_result` 到达客户端
 3. **校验权威在服务端**：前端轻校验只防崩；模型可见的错误经工具结果通道回传（不上 wire 错误码）
 4. **历史卡片感知**：回喂时经 `augmentRowsWithCards()`（`ai/history-cards.ts`）在含卡 assistant 行 content 尾部注入 `[已渲染卡片：{component}「{title}」 id:{id}]` 摘要（标题截 40 字符，不动存储；纯函数无 IO）——初始 history 构建与 reloadHistory 共用；**防仿写**：标注格式只进回喂历史（DB 与显示端点均读原文），但模型可能复读该句式并据此"假装"已渲染卡片——提示词明令禁止模型自写该格式 + 前端渲染前剥除标注行（双保险；见 D59 影响注记）

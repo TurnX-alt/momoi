@@ -132,6 +132,7 @@
 | `apps/server/src/tools/ask-user-tool.ts` | 阻塞式用户提问：`ask_user`（Promise 挂起机制，120s 超时） |
 | `apps/server/src/tools/memory-tool.ts` | 跨会话记忆工具：`save_memory`（完整契约见 [module-memory.md](./module-memory.md)） |
 | `apps/server/src/tools/group-mention-tool.ts` | @mention 工具：`at_mention`（Agent 间点名调用） |
+| `apps/server/src/tools/world-state-tool.ts` | 世界状态工具：`update_state`（仅世界会话且已定义状态时动态注入；状态读写经 `lib/world-state.ts`，详见 [module-world.md](./module-world.md)） |
 | `apps/server/src/tools/mcp-client.ts` | MCP 客户端：HTTP+SSE 连接外部 MCP 服务器，动态注入工具 |
 | `apps/server/src/tools/index.ts` | 统一导出 |
 | `apps/server/src/ai/tools.ts` | 调用 `getToolDefinitions()` 聚合工具定义 |
@@ -159,6 +160,8 @@ export interface ToolContext {
   signal?: AbortSignal
   /** Group chat: @mention signal shared between orchestrator and at_mention tool */
   mentionSignal?: MentionSignal
+  /** 世界模拟：update_state 的状态句柄（仅世界会话且已定义状态时注入） */
+  worldState?: WorldStateContext
   /** Current tool call ID (assigned by Pi loop) */
   currentToolCallId?: string
   /** Pi Agent Core 的进度回调，用于 tool_execution_update 事件 */
@@ -538,6 +541,32 @@ export class SandboxFS {
 - 只写不改：修改与遗忘由用户在记忆管理界面执行，Agent 不能改写对用户的既有认知
 
 > 完整契约（注入位置、加载链路、API、验收标准）见 [module-memory.md](./module-memory.md)。
+
+### 9. 世界状态工具（`world-state-tool.ts`）
+
+#### `update_state`
+
+世界模拟中更新成员的状态值（所有成员共享同一份状态表）。**仅世界会话且已定义状态时**
+经 `createToolAdapter` 动态注入（仿 at_mention；世界外结构性不可见）。
+
+**参数**：
+- `changes` (array, required, 1-4 条)：每条含 `agent`（成员名，大小写不敏感精确匹配）、
+  `attribute`（已定义属性）、`value`（**绝对新值**，字符串；数值也写成字符串）、
+  `reason`（可选，≤60 字）
+
+**行为**：
+- 全部读写经 `lib/world-state.ts` 的 `applyChanges`：no-op（新值 == 当前值）静默跳过；
+  落库后就地刷新共享上下文（同一 Agent 循环内连续调用不落旧快照）
+- 成功返回**含变更正文的 summary**（模型只看得到 summary）+ `data.card`
+  （component='state'）——走既有卡片捕获链路，工具条目被卡片认领隐藏
+- 值变更即时可见：同轮后续 Agent 的提示词快照看到新值
+
+**错误**（自修复通道，列出合法成员/属性与值护栏）：
+- `changes` 空 / 超 4 条 → `Error: changes ...`
+- 成员不存在 → 列出当前成员；属性未定义 → 列出可用属性
+- 值非法（>60 字符 / 多行 / 含「|」）→ 返回护栏说明
+
+> 完整契约（与轮末结算的双轨语义、卡片形态、UI 呈现）见 [module-world.md](./module-world.md)。
 
 ## 工作区生命周期
 

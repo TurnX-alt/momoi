@@ -539,6 +539,14 @@ user_agent_memories
 ├── content TEXT                   -- 记忆正文（上限 4000 字符）
 ├── source TEXT                    -- 'agent'（save_memory 写入）| 'user'（界面手动添加）
 └── created_at INTEGER             -- Unix epoch (秒)
+
+worlds
+├── conversation_id TEXT PRIMARY KEY -- 与 conversations 1:1（ON DELETE CASCADE）
+├── laws TEXT NOT NULL DEFAULT ''  -- 世界法则（可变，每轮注入系统提示）
+├── states TEXT                    -- JSON WorldStateDef[]（状态属性定义）；NULL = 无状态
+├── state_values TEXT              -- JSON {agentId: {属性名: 值}}（当前值）；NULL = 全默认
+├── created_at INTEGER             -- Unix epoch (秒)
+└── updated_at INTEGER             -- Unix epoch (秒)（详见 docs/specs/module-world.md）
 ```
 
 ### PostgreSQL 模式索引

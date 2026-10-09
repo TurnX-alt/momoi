@@ -48,6 +48,27 @@ describe('预览上下文归化（白名单）', () => {
     expect(ctx.now).toBe(1758000000)
   })
 
+  it('chat.system：world.states / state_rows 只复制提供了的键（非法条目过滤）', () => {
+    const ctx = normalizePreviewContext('chat.system', {
+      world: {
+        laws: '法则',
+        states: [{ name: '生命值', default: '100', description: '健康' }, { name: 'bad' }],
+        state_rows: [{ name: '红豆', values: { 生命值: '78' } }, { name: 'bad' }],
+      },
+    })
+    expect(ctx.world).toEqual({
+      laws: '法则',
+      states: [{ name: '生命值', default: '100', description: '健康' }],
+      state_rows: [{ name: '红豆', values: { 生命值: '78' } }],
+    })
+  })
+
+  it('neutral.world-state.*：结算配方归化（system 无 ctx；user 收 context + stateBlock）', () => {
+    expect(normalizePreviewContext('neutral.world-state.user', { context: '记录', stateBlock: '红豆：生命值 78' }))
+      .toEqual({ context: '记录', stateBlock: '红豆：生命值 78' })
+    expect(normalizePreviewContext('neutral.world-state.system', { anything: 1 })).toEqual({})
+  })
+
   it('greeting：sinceLast 支持 null 与字符串', () => {
     expect(normalizePreviewContext('notification.greeting.user', { sinceLast: null })).toEqual({ sinceLast: null })
     expect(normalizePreviewContext('notification.greeting.user', { sinceLast: '3 分钟前' })).toEqual({ sinceLast: '3 分钟前' })

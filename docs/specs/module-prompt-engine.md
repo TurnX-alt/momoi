@@ -81,6 +81,7 @@ assemble(target, ctx, opts?) →
 | `thinkingMode === false` | `chat/thinking-off` | `/no_think` 指令 |
 | `memoryEnabled` | `chat/memory-rules` | 跨会话记忆写侧规则 |
 | `world` | `chat/world-scene` | 世界模拟块（替代群组规则） |
+| `world.states`（非空） | `chat/world-state` | 世界状态块：属性定义 + 全员当前值 + 行为规则 |
 | `isGroup && !isQqGroup && !world` | `chat/group-rules` | 群组对话规则 |
 | `isQqGroup` | `chat/qq-group-rules` | QQ 群聊规则（身份锚定） |
 | `speakingRole` | `chat/speaking-role-*` | 本轮主角 / 配角 |
@@ -104,6 +105,7 @@ memory → persona → rules → scene → environment → capabilities
 | `neutral.followup.system` / `.user` | 无限模式追问（中立 Agent） | `buildFollowUpSystemPrompt` / `buildFollowUpUserMessage` |
 | `neutral.suggestions.system` / `.user` | 回复后 3 条追问建议 | `buildSuggestionsSystemPrompt` / `buildSuggestionsUserMessage` |
 | `neutral.orchestration.system` / `.user` | 群聊发言顺序裁决 | `buildOrchestrationSystemPrompt` / `buildOrchestrationUserMessage` |
+| `neutral.world-state.system` / `.user` | 世界状态轮末结算（世界裁决者） | `buildWorldStateSettlementSystemPrompt` / `buildWorldStateSettlementUserMessage` |
 | `notification.greeting.user` | 访问问候（Web Push 生成） | `buildGreetingInstruction({ sinceLast })` |
 | `notification.push.user` | 离线推送（催回消息生成） | `buildPushInstruction()` |
 | `persona.fallback` | 人设兜底链末端 | `resolveAgentPersona()` |

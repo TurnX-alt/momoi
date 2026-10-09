@@ -763,6 +763,9 @@ chatRoute.post('/', async (c) => {
       // 世界状态结算（两者独立、并行；结算仅在已定义状态的世界会话实际执行）
       if (!isInfinite) {
         await Promise.all([generateAndSendSuggestions(), settleWorldState()])
+      } else {
+        // 无限模式：首轮同样结算（第 2 轮起的结算在循环体末尾；suggestions 不生成）
+        await settleWorldState()
       }
 
       // Infinite loop: continue while state says so
