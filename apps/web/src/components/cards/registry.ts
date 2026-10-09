@@ -49,4 +49,8 @@ export const cardRegistry: Partial<Record<CardComponent, CardRegistration>> = {
     title: 'form',
     Component: lazy(() => import('./form/FormCard').then((m) => ({ default: m.FormCard }))),
   },
+  app: {
+    title: 'app',
+    Component: lazy(() => import('./app/AppBlockCard').then((m) => ({ default: m.AppBlockCard }))),
+  },
 }
