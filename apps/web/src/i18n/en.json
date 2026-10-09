@@ -184,6 +184,8 @@
       "submit": "Submit",
       "placeholder": "Type your answer..."
     },
+    "card3dLoadFailed": "Failed to load the 3D model",
+    "card3dUnsupported": "WebGL is not available — cannot display the 3D model",
     "cardActionBusy": "The assistant is still replying — try again shortly",
     "cardActionSummary": "Interacted with a card: {{label}}",
     "cardActionSummaryNamed": "Interacted with card \"{{title}}\": {{label}}",
