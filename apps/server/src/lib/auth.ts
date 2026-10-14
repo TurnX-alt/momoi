@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm'
 import { ErrCode } from '@momoi/shared/errors'
 import { env } from './config.js'
 import { ApiError } from './apiError.js'
-import { db, settings } from '../db/index.js'
+import { db, settings, users } from '../db/index.js'
 import { STAND_ALONE } from './standalone.js'
 
 // ---- Admin membership ----
@@ -90,6 +90,10 @@ export async function adminAuthMiddleware(c: Context, next: Next) {
   if (!result) {
     throw new ApiError(ErrCode.AUTH_INVALID_TOKEN)
   }
+  // 封禁即时生效：ADMIN 名单与 banned 是两个独立维度，都要拦。
+  if (await isUserBanned(result.username)) {
+    throw new ApiError(ErrCode.AUTH_INVALID_TOKEN)
+  }
   if (!isAdmin(result.username)) {
     throw new ApiError(ErrCode.AUTH_FORBIDDEN)
   }
@@ -165,4 +169,28 @@ export async function verifyUserToken(token: string): Promise<{ username: string
   } catch {
     return null
   }
+}
+
+/**
+ * 封禁即时生效检查。
+ *
+ * 为什么必须逐请求查库：JWT 是自包含的无状态凭证（D32 明确拒绝会话表），签发后
+ * 无法从中吊销。此前 `verifyUserToken` 只验签不查 `banned`，导致管理员封禁用户后，
+ * 该用户手上已签发的 token 仍能访问全部受保护 API 最长 14 天——唯一的止损手段是
+ * 轮换 `JWT_SECRET`（会误伤所有用户）。
+ *
+ * 开销：`users.username` 是 TEXT 主键 → `WHERE username = ?` 走主键索引；
+ * node:sqlite 是本地同步查询，单请求开销可忽略。刻意不加缓存——缓存窗口会直接
+ * 削弱「即时生效」这一安全目标。
+ *
+ * 用户不存在时返回 false（不阻断）：缺失账号由后续逻辑判定，本函数只回答
+ * 「已知用户是否被封禁」。
+ */
+export async function isUserBanned(username: string): Promise<boolean> {
+  const row = await db
+    .select({ banned: users.banned })
+    .from(users)
+    .where(eq(users.username, username))
+    .get()
+  return row?.banned === true
 }
