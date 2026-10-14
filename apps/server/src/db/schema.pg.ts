@@ -53,9 +53,9 @@ export const groupConversationAgents = pgTable('group_conversation_agents', {
   conversation_id: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
   agent_id: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
   sort_order: integer('sort_order').notNull().default(0),
-}, (table) => ({
-  pk: primaryKey({ columns: [table.conversation_id, table.agent_id] }),
-}))
+}, (table) => [
+  primaryKey({ columns: [table.conversation_id, table.agent_id] }),
+])
 
 export const mcpServers = pgTable('mcp_servers', {
   id: text('id').primaryKey(),
@@ -104,9 +104,9 @@ export const qqBindings = pgTable('qq_bindings', {
   group_enabled: boolean('group_enabled').notNull().default(false),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
-}, (table) => ({
-  pk: primaryKey({ columns: [table.user_id, table.agent_id] }),
-}))
+}, (table) => [
+  primaryKey({ columns: [table.user_id, table.agent_id] }),
+])
 
 export const userAgentMemories = pgTable('user_agent_memories', {
   id: text('id').primaryKey(),
@@ -122,9 +122,9 @@ export const qqGroupConversations = pgTable('qq_group_conversations', {
   group_openid: text('group_openid').notNull(),
   conversation_id: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
   created_at: integer('created_at').notNull(),
-}, (table) => ({
-  pk: primaryKey({ columns: [table.app_id, table.group_openid] }),
-}))
+}, (table) => [
+  primaryKey({ columns: [table.app_id, table.group_openid] }),
+])
 
 export const pushSubscriptions = pgTable('push_subscriptions', {
   id: serial('id').primaryKey(),

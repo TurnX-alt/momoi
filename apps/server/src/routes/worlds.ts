@@ -144,7 +144,7 @@ worldsRoute.post('/', async (c) => {
   const convId = randomUUID()
   const now = Math.floor(Date.now() / 1000)
 
-  // 无 db.transaction()（sql.js 适配层不支持）—— 顺序写入
+  // 无 db.transaction()（node:sqlite 适配层支持事务但为同步回调，与现有 async 代码不兼容）—— 顺序写入
   await db.insert(conversations).values({
     id: convId,
     user_id: userId,

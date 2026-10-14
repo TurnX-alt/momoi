@@ -6,3 +6,7 @@ allowBuilds:
   '@google/genai': true
   esbuild: true
   protobufjs: true
+
+minimumReleaseAgeExclude:
+  - '@homurajs/core@26.10.14'
+  - '@homurajs/db@26.10.14'

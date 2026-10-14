@@ -415,12 +415,12 @@ conversationsRoute.post('/merge', async (c) => {
     throw new ApiError(ErrCode.CONV_MERGE_MIXED_TYPES)
   }
 
-  // Perform merge: all steps run without a transaction. Drizzle's sql.js
-  // adapter doesn't support db.transaction(), so we batch all INSERTs and use
-  // the per-source loop structure — at worst a crash leaves one source
+  // Perform merge: all steps run without a transaction. node:sqlite 的
+  // db.transaction() 只接受**同步**回调（sync 驱动禁止 async），与本段 await 顺序写
+  // 结构不兼容，故沿用 per-source loop — at worst a crash leaves one source
   // un-merged (sources are soft-deleted last, so nothing is lost).
   // NOTE: 曾误写为 tx.*（事务包装拆除后遗留），运行时直接 ReferenceError——
-  // 这里必须是 db.*，与 sql.js / postgres 两种驱动行为保持一致。
+  // 这里必须是 db.*，与 node:sqlite / postgres 两种驱动行为保持一致。
   // 2. Create new conversation C
   const newId = randomUUID()
   const now = Math.floor(Date.now() / 1000)
@@ -462,7 +462,7 @@ conversationsRoute.post('/merge', async (c) => {
     }
 
     // 3b. Merge groupConversationAgents (dedup)
-    // （显式行类型：db 是 sql.js/pg 驱动实例的联合类型，联合上 select 的
+    // （显式行类型：db 是 node:sqlite/pg 驱动实例的联合类型，联合上 select 的
     //   行类型推断退化为 any，回调参数需落地标注）
     const sourceAgents: (typeof groupConversationAgents.$inferSelect)[] = await db.select().from(groupConversationAgents)
       .where(eq(groupConversationAgents.conversation_id, source.id))

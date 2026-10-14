@@ -9,7 +9,7 @@
 // 「实际使用哪段描述」——引擎里注册的优先，回退工具定义本身。
 //
 // 本模块刻意 **不 import 工具系统**：prompts 库保持为「纯字符串 + 注册表」，
-// 不把 DB（sql.js）与文档解析库拖进任何引用 prompts/index.js 的地方。
+// 不把 DB（node:sqlite）与文档解析库拖进任何引用 prompts/index.js 的地方。
 // 描述源由调用方注入（pi-adapter 手里的 ToolDefinition 就够了）；
 // 管理端目录另经 seedToolDescriptions() 批量播种。
 // MCP 工具描述来自远端、随连接动态变化，不进入目录（回退远程描述）。

@@ -189,7 +189,10 @@ export async function initPg(dbUrl: string, user: string, password: string) {
   await pool.query(`ALTER TABLE worlds ADD COLUMN IF NOT EXISTS states TEXT`)
   await pool.query(`ALTER TABLE worlds ADD COLUMN IF NOT EXISTS state_values TEXT`)
 
-  const db = drizzlePg(pool, { schema }) as any
+  // drizzle-orm 1.0-rc.4：node-postgres 的 drizzle() 不再接受 (client, config) 位置参数，
+  // 改用对象形式 { client }。schema 键已被 Omit（关系 API 改用 relations）；momoi 不使用
+  // db.query.* 关系查询，故不传——表定义由 db/index.ts 从 schema.pg.ts 静态导出消费。
+  const db = drizzlePg({ client: pool }) as any
   console.log('[db] PostgreSQL ready')
   return { db, schema }
 }

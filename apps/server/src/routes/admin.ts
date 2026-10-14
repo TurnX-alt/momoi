@@ -439,8 +439,8 @@ adminRoute.delete('/users/:username', async (c) => {
 
   // Delete all conversations (cascades to messages, group_conversation_agents)
   await db.delete(conversations).where(eq(conversations.user_id, username)).run()
-  // Delete WeChat binding (sql.js has foreign_keys OFF by default,
-  // so cascade cannot be relied on — clean up explicitly).
+  // Delete WeChat binding (initSqlite 显式 PRAGMA foreign_keys=OFF 以还原旧 sql.js
+  // 宽松语义，故 cascade cannot be relied on — clean up explicitly).
   await db.delete(wechatBindings).where(eq(wechatBindings.user_id, username)).run()
   // Delete QQ binding(s) + stop gateway connections for this user.
   // Batch delete qqGroupConversations instead of per-binding loop.

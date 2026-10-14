@@ -1,4 +1,4 @@
-// Shared migration SQL (SQLite dialect, used by sql.js).
+// Shared migration SQL (SQLite dialect, executed via node:sqlite DatabaseSync.exec).
 // PostgreSQL init uses inline CREATE TABLE IF NOT EXISTS statements that
 // match this schema but use PG-native types (BOOLEAN, SERIAL, etc.).
 
