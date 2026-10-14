@@ -88,7 +88,7 @@ pnpm start          # 启动（node apps/server/dist/index.js）
 
 - **前端**：React 19 + shadcn/ui（Radix + Tailwind）+ Vite 8
 - **后端**：Hono 4 + Pi Agent Core + Drizzle ORM
-- **数据库**：SQLite（sql.js）默认；可选 PostgreSQL
+- **数据库**：SQLite（node:sqlite，每 commit fsync）默认；可选 PostgreSQL
 - **实时通信**：SSE（Server-Sent Events）
 - **认证**：PBKDF2 PIN + JWT（HttpOnly Cookie）+ OAuth2
 - **文件解析**：xlsx、pdf-parse、mammoth、word-extractor

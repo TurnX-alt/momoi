@@ -21,22 +21,26 @@
 
 ---
 
-## D2：SQLite 替代外部数据库
+## D2：SQLite 替代外部数据库（driver 已由 D61 从 sql.js 换为 node:sqlite）
 
 **日期**：架构确立时
 
 **背景**：需要一个数据库来存储对话历史和配置。
 
-**决策**：使用 SQLite（sql.js + Drizzle ORM），单文件存储。
+**决策**：使用 SQLite 单文件存储。
+
+> ⚠ 2026-10 更新：SQLite 的**实现 driver 已由 sql.js 换成 node:sqlite**（见 D61）。
+> 本决策「用 SQLite 单文件」的内核不变；下文关于 sql.js（WASM、内存态、无需原生模块）的
+> 具体理由已被 D61 取代，保留仅作历史。
 
 **原因**：
 - 零配置，无需安装/维护外部数据库服务
 - 单文件 `data/momoi.db`，易于备份和迁移
 - 对于单用户/小团队场景完全足够
-- sql.js 提供纯 WASM SQLite 支持，无需编译原生模块
+- ~~sql.js 提供纯 WASM SQLite 支持，无需编译原生模块~~（D61：改用 Node 内置 node:sqlite，同样无需编译）
 
 **影响**：
-- sql.js WASM 执行在单进程中，写入操作自然串行化
+- ~~sql.js WASM 执行在单进程中，写入操作自然串行化~~（D61：node:sqlite 同为单连接同步驱动，写入仍串行化）
 - 数据文件随使用时间增长，需要定期清理
 
 ---
@@ -912,9 +916,14 @@
 
 ---
 
-## D39：PostgreSQL 远程数据库模式 — sql.js 本地 / PG 远程双后端
+## D39：PostgreSQL 远程数据库模式 — 本地 SQLite / PG 远程双后端
 
 **日期**：2026-09-10（初版多数据库支持）→ 2026-09-14（精简为 SQLite + PG 双后端）
+
+> ⚠ 2026-10 更新：本地 SQLite 的 driver 已由 sql.js 换成 node:sqlite（见 D61），
+> **本决策立项时作为动因之一的「内存态写入 + 30 秒持久化间隔数据丢失窗口」已被 D61 根治**。
+> PG 远程模式因此回归为纯粹的「横向扩容 / 团队生产」选项，不再兼任「规避本地丢数据」的职责。
+> 下文提及 sql.js、30s 持久化、SIGTERM flush 的具体描述均已被 D61 取代，保留仅作历史。
 
 **背景**：sql.js（SQLite WASM）零配置轻量，但内存态写入 + 30 秒持久化间隔有数据丢失窗口，且单实例无法横向扩容。需要可选的生产级远程数据库支持。
 
@@ -932,8 +941,8 @@
 - SQLite（sql.js）零配置覆盖开发/个人部署；PG 覆盖生产/团队/高可用场景——一个 `DATABASE_URL` 即可切换，不改代码
 - 双 schema 文件而非运行时方言判断：编译期隔离更安全（选错方言不会静默出 bug）且代码更清晰
 - `node-postgres` 而非 `pg-promise`：Drizzle ORM 官方推荐，pool + 原生 SQL 足够
-- SQLite ADDITIVE_MIGRATIONS 每条 try/catch：sql.js 不支持 `IF NOT EXISTS` 的 ALTER TABLE，逐条 try 避免了"迁移失败则库不可用"的一级事故
-- 30 秒自动持久化 + SIGINT/SIGTERM 退出时同步 `writeFileSync` 落盘（SQLite 模式）：异步 `persist()` 在 open 时截断文件（O_TRUNC），若进程在写入完成前被 pm2 SIGKILL 则数据库文件变空、数据不可逆丢失，同步写入彻底消除该竞态
+- SQLite ADDITIVE_MIGRATIONS 每条 try/catch：SQLite 不支持 `IF NOT EXISTS` 的 ALTER TABLE，逐条 try 避免了"迁移失败则库不可用"的一级事故（node:sqlite 下同样适用，见 D61）
+- ~~30 秒自动持久化 + SIGINT/SIGTERM 退出时同步 `writeFileSync` 落盘（SQLite 模式）~~（**D61 已删除**：node:sqlite 每 commit 自动 fsync，无需定时 export，也不依赖退出 flush）
 
 **备选与权衡**：
 - ❌ 单 SQLite（不引入 PG）：被视为性能/部署场景的限制而非 bug——生产部署需求是真实存在的，PG 支持干净地解决了这个问题
@@ -1288,7 +1297,7 @@
 4. 会话「删除」在 UI/API 语义上改称**归档**（本就是 `deleted_at` 软删除，名实相符）
 
 **依据**：
-- **移动会话 = 文件迁移困境**：共享目录中的文件无法归属单一会话，迁移要么同名覆盖（灾难）、要么全量拷贝到每个成员（配额爆炸），且 sql.js 无事务、中途失败产生半迁移状态——「不可移动」从根上消灭了这一类问题
+- **移动会话 = 文件迁移困境**：共享目录中的文件无法归属单一会话，迁移要么同名覆盖（灾难）、要么全量拷贝到每个成员（配额爆炸），且（sql.js 时代）本地库无可用事务、中途失败产生半迁移状态——「不可移动」从根上消灭了这一类问题。（注：D61 换 node:sqlite 后本地已具备事务能力，但为同步回调，与现有 async 迁移结构不兼容；「不可移动」决策的核心理由是文件归属，不受影响）
 - **删除工作区不置 NULL 会话行**：保持「单行 DELETE」的原子性（无事务下最安全）；悬空值 + 前端防御渲染达到与「UPDATE 置 NULL」相同的 UI 语义，却不触碰成员数据
 - **磁盘永不删**：避免不可逆数据丢失；重建同名工作区 = 新 id 新目录，无复活歧义
 - `ws-` 前缀隔离 workspace id 与 conversation id 两个 UUID 命名空间，人肉可辨可 grep
@@ -1653,3 +1662,35 @@
 - web：cards/state/StateCard（新）+ registry、sidebar/WorldStatesFields（新）+ LawsEditor 重构（双分页 + 当前值手动修正）+ NewWorkflowDialog、hooks（useChat / useGroupChat 的草稿链路与 realtime:world_state 刷新）、api、i18n 三语
 - 测试：`world-state.test.ts`（12 用例）、preview +2、golden +3（world-with-states / neutral.world-state.*）、`scripts/test-world-state-e2e.ts`（19 断言）
 - 详见 `docs/specs/module-world.md`
+
+---
+
+## D61：本地 SQLite driver 从 sql.js 换为 node:sqlite（根治满载丢数据）
+
+**日期**：2026-10-14
+
+**背景**：生产实战暴露数据丢失——服务器满载时进程被挤死（OOM / SIGKILL），最近 ≤30s 的已提交数据随进程蒸发。根因是 sql.js 的架构：整库常驻 WASM 内存，靠「30s 定时 `export()` 全量序列化 + 退出时 `writeFileSync` flush」落盘。这有三个结构性缺陷：① 已提交数据在两次 persist 之间只活在内存，`SIGKILL` 不可捕获 → 丢失窗口是天花板，调小定时器只能让它响得慢；② `Buffer.from(sqlDb.export())` 每次 persist 额外吃 ~2x 库大小内存，满载时这个 tick 自己就可能触发 OOM（自我实现的预言）；③ D39 曾用「加 PG 远程模式」绕过，但那是**规避**而非根治，且把本地部署用户留在危险默认上。
+
+**决策**：本地 SQLite 的 driver 由 `sql.js` 换为 `node:sqlite`（Node ≥ 22.5 内置），复用已发布到 npm 的 `@homurajs/db`（`createSqliteDb`），drizzle-orm 连带升到 `1.0.0-rc.4`（`node-sqlite` 适配器仅自此版本存在）。**保留 momoi 现有 server 骨架**（全局单例 `db`、手写路由、自定义 PIN+JWT auth），只换最底层 driver 与持久化机制。
+
+**原因**：
+- node:sqlite 缺省 `journal_mode=delete` + `synchronous=FULL`——**每笔 commit 由 SQLite 自己 fsync 落盘**，持久性不依赖优雅退出。进程被强杀（断电/OOM/kill -9）时已提交数据全部保全，下次打开自动回滚未提交事务。三条丢失窗口一次性根治。
+- 数据留磁盘、进程内仅 page cache，不再常驻整库 + export 双份拷贝 → **顺带降低满载 OOM 发生率**（CI 已显示服务器内存紧张，构建前检查 MemAvailable<4GiB）。
+- sql.js `export()` 产出的就是标准 SQLite 文件格式，node:sqlite 能**原地打开现存 `data/momoi.db`**，无需数据转换脚本。
+- 复用 `@homurajs/db` 而非裸 `new DatabaseSync`：与 homura 生态对齐、drizzle 版本天然锁定去重为单一实例；`createSqliteDb` 一行拿 drizzle 实例，`.run/.get/.all` 方法面与旧 sql-js 适配器逐字兼容。
+
+**关键约束与权衡**：
+- **外键语义突变**（头号行为风险）：node:sqlite 缺省**强制**外键（`foreign_keys=ON`，与标准 SQLite C 库默认 OFF 相反），而 momoi 契约文档 + 15+ 路由依赖旧 sql.js「FK 不强制 + 路由层手动级联」语义。→ `initSqlite` 显式 `PRAGMA foreign_keys = OFF` **逐字还原**既有行为，本轮**不动任何路由删除逻辑**。拥抱真外键级联（需审 15+ 路由 + 清现存库可能的悬空外键脏行）留作未来单独一轮。
+- **不复用 `@homurajs/db` 的 `runMigrations`**：它要求 drizzle-kit rc.4 目录格式（`<ts>_name/migration.sql` + `--> statement-breakpoint`，且禁止旧 `meta/_journal.json`），momoi 无迁移产物、纯手写 DDL。→ 保留 momoi 的 `MIGRATION_SQL` + try/catch ALTER，改用 `db.$client.exec(...)` 执行（node:sqlite 的 `exec` 支持一次跑多语句串、`IF NOT EXISTS` 幂等）。
+- **drizzle 升级是全局的**：连带波及 pg 路线——rc.4 的 node-postgres `drizzle()` 不再接受 `(client, config)` 位置参数，`db/pg.ts` 的 `drizzlePg(pool,{schema})` 已改为 `drizzlePg({ client: pool })`（`schema` 键被 rc.4 Omit，momoi 不用 `db.query.*` 关系 API 故直接去掉）。
+- **事务能力变化**：node:sqlite 的 `db.transaction()` 可用但**仅同步回调**（sync 驱动禁 async）。momoi 现 0 处使用事务（群聊合并 / 建世界两处是 async 顺序写），迁移不破坏任何事务代码；这两处已知非原子流程可后续单独改造，不在本轮。
+- ❌ 备选「留在 sql.js，仅缩小定时器 + 原子 rename 落盘」：治标不治本，丢失窗口消不掉、export 内存开销仍在，被否。
+- ❌ 备选「完整迁移到 @homurajs/app-kit 渐进式装配」：等于重写整个 server 骨架，高风险，且对「满载丢数据」无额外帮助，超出本轮边界，被否。
+
+**影响**：
+- server：`db/sqlite.ts` 重写（换 driver + 删 persist/setInterval/SIGTERM flush 整套落盘层）、`db/pg.ts`（`drizzle()` 调用形式适配 rc.4）、`db/ddl.ts`（注释）、`schema.sqlite.ts` + `schema.pg.ts`（3 张复合主键表回调 对象→数组 消 deprecation，两文件共 6 处）、`tsup.config.ts`（external 去 `sql.js`）、`package.json`（去 `sql.js`/`@types/sql.js`，加 `@homurajs/db@26.10.14`，`drizzle-orm`/`drizzle-kit` 锁 `1.0.0-rc.4`）；4 处路由注释修正过时归因（conversations/admin/worlds + prompts/tools）
+- `db/index.ts` **无需改动**（`initSqlite` 返回 `{ db, schema }` 契约不变；新增可选 `dbPath` 参数仅供测试注入）
+- 测试：新增 `test/db-durability.test.ts`（5 用例）+ `test/fixtures/kill9-child.mjs`——**kill-9 持久性门禁**（spawn 子进程写盘后 SIGKILL，重开断言数据仍在，直接复刻生产事故）+ FK OFF 语义对齐 + 迁移幂等 + drizzle CRUD 冒烟 + 现存库连续性。补上 momoi db 层此前**零测试覆盖**的洞。
+- 文档：本决策 + D2/D39 交叉引用标注；`module-database.md`（引擎/持久化/外键/迁移/依赖全面更新）、`ARCHITECTURE.md`、`PRD.md`、`module-config.md`、`module-prompt-engine.md`、`AGENTS.md`、`README.md`、`.env.example`
+- 部署：`node:sqlite` 要求 Node ≥ 22.5（生产 v26 已满足）；无原生模块编译、无 WASM 资产
+- 详见 `docs/specs/module-database.md`

@@ -4,7 +4,7 @@
 
 数据层支持两种模式：
 
-- **本地模式（默认）**：SQLite 单文件数据库，通过 `sql.js`（WebAssembly 编译的 SQLite）在 Node.js 进程中直接操作，无需原生模块编译。Drizzle ORM 提供类型安全的查询构建。
+- **本地模式（默认）**：SQLite 单文件数据库，通过 `node:sqlite`（Node 内置的 SQLite 绑定，Node ≥ 22.5）在 Node.js 进程中直接操作，每笔 commit 由 SQLite 自己 fsync 落盘（`synchronous=FULL`）。经 `@homurajs/db` 的 `createSqliteDb` 封装，Drizzle ORM（`drizzle-orm/node-sqlite`）提供类型安全的查询构建。
 - **远程模式**：PostgreSQL，当同时设置环境变量 `DATABASE_URL`、`DATABASE_USER`、`DATABASE_SECRET` 时自动启用，连接池上限 5。
 
 所有对话历史、配置、PIN 哈希、Agent 信息、用户账号、OAuth 绑定、微信绑定、MCP 服务器配置等均持久化存储。迁移策略采用 `CREATE TABLE IF NOT EXISTS` 建表 + `ALTER TABLE ADD COLUMN`（try/catch 安全）做增量列迁移，不引入外部迁移工具。
@@ -13,38 +13,37 @@
 
 | 文件 | 职责 |
 |---|---|
-| `apps/server/src/db.ts` | 数据库客户端初始化 + 方言选择 + 迁移逻辑 |
-| `apps/server/src/schema.ts` | Drizzle ORM SQLite 表定义（12 张表） |
-| `apps/server/src/schema.pg.ts` | Drizzle ORM PostgreSQL 表定义（12 张表） |
+| `apps/server/src/db/index.ts` | 方言选择（本地 SQLite / 远程 PG）+ 统一导出 `db` 与 15 张表 |
+| `apps/server/src/db/sqlite.ts` | 本地模式：`node:sqlite` 建库 + pragma + 迁移（`initSqlite`） |
+| `apps/server/src/db/pg.ts` | 远程模式：PostgreSQL 建库 + 内联 DDL 迁移（`initPg`） |
+| `apps/server/src/db/ddl.ts` | SQLite 方言的手写迁移 SQL（`MIGRATION_SQL`） |
+| `apps/server/src/db/schema.sqlite.ts` | Drizzle ORM SQLite 表定义（15 张表） |
+| `apps/server/src/db/schema.pg.ts` | Drizzle ORM PostgreSQL 表定义（15 张表） |
 | `apps/server/src/routes/*.ts` | 各路由通过 `db` 查询数据 |
 
 ## 数据库位置与初始化
 
 ### 本地 SQLite 模式
 
-- **路径**：`data/momoi.db`（相对于项目根目录）
-- **创建时机**：`db.ts` 导入时自动创建 `data/` 目录，若 `.db` 文件不存在则新建内存数据库并持久化
-- **引擎**：`sql.js`（WebAssembly SQLite，无原生依赖）
+- **路径**：`data/momoi.db`（相对于项目根目录，由 `repoRoot()` 锚定）
+- **创建时机**：`db/index.ts` 导入时（顶层 await）调用 `initSqlite()`，自动创建 `data/` 目录；node:sqlite 传文件路径即自动加载已有库或新建，无需先读 buffer
+- **引擎**：`node:sqlite`（Node ≥ 22.5 内置，无原生模块编译、无 WASM）；经 `@homurajs/db` 的 `createSqliteDb` 封装为 drizzle 实例
 
 ```typescript
-const initSqlJs = (await import('sql.js')).default
-const { drizzle } = await import('drizzle-orm/sql-js')
+import { createSqliteDb } from '@homurajs/db'
 
-const dataDir = path.resolve('data')
+const dataDir = path.resolve(repoRoot(), 'data')
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
 const dbPath = path.join(dataDir, 'momoi.db')
 
-const SQL = await initSqlJs()
-let sqlDb: any
-if (fs.existsSync(dbPath)) {
-  sqlDb = new SQL.Database(fs.readFileSync(dbPath))  // 加载已有库
-} else {
-  sqlDb = new SQL.Database()  // 新建
-}
+// node:sqlite 传路径即自动加载/建库（现存 sql.js 导出的标准 SQLite 文件原地可读）
+const db = createSqliteDb({ dialect: 'sqlite', path: dbPath })
+db.$client.exec('PRAGMA foreign_keys = OFF')  // 还原旧 sql.js 宽松语义
+db.$client.exec('PRAGMA busy_timeout = 5000')
 ```
 
-- **持久化**：每 30 秒自动 `fs.writeFileSync(dbPath, Buffer.from(sqlDb.export()))`（异步，适合定时保存）；`SIGINT`/`SIGTERM` 时使用**同步** `writeFileSync` 落盘——异步 `persist()` 在 open 时截断文件（O_TRUNC），若进程在写入完成前被 pm2 SIGKILL 则数据库文件变空、数据不可逆丢失，同步写入彻底消除该竞态
-- **外键**：sql.js 默认不强制外键——删表由路由层手动级联处理
+- **持久化**：node:sqlite 缺省 `journal_mode=delete` + `synchronous=FULL`——**每笔 commit 由 SQLite 自己 fsync 落盘**，持久性不依赖优雅退出。进程被强杀（断电 / OOM / `kill -9`）时，已提交数据全部保全，下次打开自动回滚未提交事务。**旧 sql.js 的「内存态 + 30s 定时 export + SIGTERM flush」整套落盘逻辑已删除**——那正是满载挤死进程时丢最近 ≤30s 数据的根因（见 D39）。
+- **外键**：node:sqlite 缺省**强制**外键（`foreign_keys=ON`），与旧 sql.js「不强制」相反。`initSqlite` 显式 `PRAGMA foreign_keys = OFF` 逐字还原既有宽松语义——删表仍由路由层手动级联处理，15+ 路由的删除逻辑无需改动，且现存库可能积累的悬空外键历史行在 OFF 下无害。拥抱真外键级联留作未来单独一轮。
 
 ### 远程 PostgreSQL 模式
 
@@ -204,7 +203,7 @@ if (fs.existsSync(dbPath)) {
 ## Drizzle Schema 定义
 
 ```typescript
-// ---- SQLite (schema.ts) ----
+// ---- SQLite (schema.sqlite.ts) ----
 
 export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
@@ -259,9 +258,9 @@ export const groupConversationAgents = sqliteTable('group_conversation_agents', 
   agent_id: text('agent_id').notNull()
     .references(() => agents.id, { onDelete: 'cascade' }),
   sort_order: integer('sort_order').notNull().default(0),
-}, (table) => ({
-  pk: primaryKey({ columns: [table.conversation_id, table.agent_id] }),
-}))
+}, (table) => [
+  primaryKey({ columns: [table.conversation_id, table.agent_id] }),
+])
 
 export const mcpServers = sqliteTable('mcp_servers', {
   id: text('id').primaryKey(),
@@ -306,23 +305,25 @@ PostgreSQL 版本（`schema.pg.ts`）与上面对应，差异点：
 
 ## 迁移策略
 
-**设计原则**：零外部迁移工具。DDL 全部写在 `db.ts` 内，`CREATE TABLE IF NOT EXISTS` 建表 + `ALTER TABLE ADD COLUMN`（try/catch 容忍已存在列）做增量列迁移。
+**设计原则**：零外部迁移工具。DDL 全部写在 `db/ddl.ts`（SQLite）或 `db/pg.ts` 内联（PG），`CREATE TABLE IF NOT EXISTS` 建表 + `ALTER TABLE ADD COLUMN`（try/catch 容忍已存在列）做增量列迁移。
 
-### 迁移流程（`db.ts`）
+### 迁移流程（`db/sqlite.ts` 的 `initSqlite`）
 
 **SQLite 路径**：
 
-1. 加载或创建 `sql.js` 数据库
-2. `sqlDb.run(MIGRATION_SQL)` 执行全部 DDL（12 张表 + 3 个索引），`IF NOT EXISTS` 保证幂等
-3. `ADDITIVE_MIGRATIONS` 数组：逐条 `ALTER TABLE agents ADD COLUMN ...`，外层 `try/catch` 吞掉 "column already exists" 错误——sql.js 不支持 `IF NOT EXISTS` 的 `ALTER` 语法，只能用 try/catch
-4. 立即 `persist()` 落盘
+1. `createSqliteDb({ dialect:'sqlite', path })` 打开或新建库（node:sqlite 传路径即自动加载/建库）
+2. `PRAGMA foreign_keys = OFF`（还原旧 sql.js 宽松语义）+ `PRAGMA busy_timeout = 5000`
+3. `db.$client.exec(MIGRATION_SQL)` 执行全部 DDL（15 张表 + 索引），`IF NOT EXISTS` 保证幂等；node:sqlite 的 `exec` 支持一次执行多语句串
+4. 逐条 `try { db.$client.exec('ALTER TABLE ... ADD COLUMN ...') } catch {}` 补增量列——SQLite 的 `ALTER TABLE ADD COLUMN` 不支持 `IF NOT EXISTS`，用 try/catch 吞掉 "duplicate column" 错误（node:sqlite 与 sql.js 行为一致）
+5. 无条件 `CREATE INDEX IF NOT EXISTS`（幂等）
+6. **无落盘步骤**——每笔 DDL 由 `synchronous=FULL` 自动 fsync，无需 `persist()`/`export()`
 
 **PostgreSQL 路径**：
 
 1. 创建连接池
 2. `pool.query(...)` 执行全部 DDL（12 张表 + 3 个索引 + 增量列迁移），PostgreSQL 原生支持 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
 
-**不提供跨方言兼容**：SQLite 和 PostgreSQL 的 Schema 文件独立维护（`schema.ts` / `schema.pg.ts`），无运行时方言转换。
+**不提供跨方言兼容**：SQLite 和 PostgreSQL 的 Schema 文件独立维护（`schema.sqlite.ts` / `schema.pg.ts`），无运行时方言转换。
 
 **不提供旧库兼容**：无 PRAGMA 预检、无 ALTER TABLE 回填。旧库缺列直接运行时出错，删库重建即可。
 
@@ -436,10 +437,11 @@ await db.update(conversations)
 
 | 包 | 说明 |
 |---|---|
-| `sql.js` | SQLite WebAssembly 引擎（纯 JS，无需编译；本地模式必须） |
-| `drizzle-orm` + `drizzle-orm/sql-js` | TypeScript ORM（SQLite 方言） |
+| `node:sqlite` | Node 内置 SQLite 绑定（Node ≥ 22.5；本地模式引擎，无第三方依赖） |
+| `@homurajs/db` | `createSqliteDb`（node:sqlite 的 drizzle 封装）；精确锁 `26.10.14` |
+| `drizzle-orm` + `drizzle-orm/node-sqlite` | TypeScript ORM（SQLite 方言）；精确锁 `1.0.0-rc.4`（node-sqlite 适配器仅自此版本存在，须与 @homurajs/db 硬依赖同版本以去重为单一实例） |
 | `pg` + `drizzle-orm/node-postgres` | PostgreSQL 驱动 + ORM 方言（远程模式可选，需手动安装） |
-| `drizzle-kit`（devDependency） | 仅用于生成类型定义，不用于迁移 |
+| `drizzle-kit`（devDependency） | 仅用于生成类型定义，不用于迁移；随 drizzle-orm 锁 `1.0.0-rc.4` |
 
 ## 验收标准
 

@@ -75,7 +75,7 @@
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │                       数据层                                            │  │
 │  │  ┌────────────────────────────────────────────────────────────────┐    │  │
-│  │  │  db.ts — SQLite (sql.js + Drizzle ORM)                                │    │  │
+│  │  │  db/ — SQLite (node:sqlite + Drizzle ORM，每 commit fsync)             │    │  │
 │  │  │  PostgreSQL (pg + Drizzle ORM, DATABASE_URL 环境变量切换)       │    │  │
 │  │  │  conversations | messages | settings | agents                 │    │  │
 │  │  │  group_conversation_agents | mcp_servers | users              │    │  │
@@ -653,8 +653,9 @@ IP 速率限制：
 
 数据库模式：
   本地模式（默认）：
-    SQLite via sql.js（文件：data/momoi.db，30s 间隔自动持久化）
-    SIGINT/SIGTERM 触发同步持久化（writeFileSync）+ 优雅退出
+    SQLite via node:sqlite（文件：data/momoi.db，每 commit 由 SQLite 自己 fsync）
+    synchronous=FULL 保证持久性不依赖优雅退出——进程被强杀（断电/OOM/kill -9）已提交数据仍保全
+    显式 PRAGMA foreign_keys=OFF 还原旧 sql.js 宽松语义（删表由路由层手动级联）
 
   远程模式：
     DATABASE_URL + DATABASE_USER + DATABASE_SECRET 三个环境变量同时存在时

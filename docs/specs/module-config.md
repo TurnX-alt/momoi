@@ -90,7 +90,7 @@ export const env = {
 | `OPENAI_API_KEY` | API 密钥 |
 | `OPENAI_MODEL` | 模型名称（可选；缺省时使用 `shared/constants.ts` 中的默认值） |
 | `PORT` | 服务端口（默认 11408） |
-| `DATABASE_URL` | PostgreSQL 连接 URL（可选；不设则用 sql.js） |
+| `DATABASE_URL` | PostgreSQL 连接 URL（可选；不设则用本地 node:sqlite） |
 | `DATABASE_USER` | PostgreSQL 用户名（可选） |
 | `DATABASE_SECRET` | PostgreSQL 密码（可选） |
 
@@ -361,7 +361,7 @@ users:
 
 ### 已知限制
 
-- `apply` 无事务（sql.js 各语句独立提交）；中途 DB 异常会留下部分应用（概率极低，双重校验缓解）
+- `apply` 无事务（各语句独立提交；node:sqlite 的 `db.transaction()` 仅支持同步回调，与现有 async 结构不兼容）；中途 DB 异常会留下部分应用（概率极低，双重校验缓解）
 - 超大 background 可能使导出文件超过 10MB 导入上限（导出文案提示）
 - 导出文件等同凭证（含 `api_key` 与 `client_secret` 明文），UI 有黄色警示 + PIN 门控
 - 导入会把 `gateway` 段的值钉进目标实例的 `settings` 表，覆盖其 `.env` 配置

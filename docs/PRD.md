@@ -245,7 +245,7 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 
 - 通过 `DATABASE_URL`、`DATABASE_USER`、`DATABASE_SECRET` 三个环境变量同时填写启用远程数据库
 - 系统从 `DATABASE_URL` 的 scheme 自动识别数据库类型（`postgres://` 或 `postgresql://` → PostgreSQL）
-- 未配置或三个变量缺一时使用默认的本地 **sql.js（SQLite 内存持久化）** 模式
+- 未配置或三个变量缺一时使用默认的本地 **node:sqlite（SQLite 单文件，每 commit fsync 持久化）** 模式
 - PostgreSQL 模式使用 `pg`（node-postgres）驱动 + `drizzle-orm/node-postgres` + `schema.pg.ts` 专用 Schema 定义
 - 启动时自动执行 DDL：`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ADD COLUMN IF NOT EXISTS` 增量迁移
 - 连接池配置：最大 5 个连接
@@ -286,7 +286,7 @@ Momoi 是一个**轻量级、可自托管的 Web AI 智能体平台**。它的�
 - 支持 Pi 式并行批执行（同一轮内多工具并发执行 + 顺序回填 + 批量终止）
 - 漂移检测（连续重复工具批次自动终止）
 - 支持多轮工具调用
-- 支持 SQLite（本地 sql.js）和 PostgreSQL 两种数据库后端，业务层无需感知差异
+- 支持 SQLite（本地 node:sqlite）和 PostgreSQL 两种数据库后端，业务层无需感知差异
 
 ### NF3：可靠性
 

@@ -32,7 +32,7 @@ pnpm monorepo（`apps/*` + `packages/*`），纯 workspace 协议，无外部编
 
 - **前端**：React 19 + shadcn/ui + Vite 8，outDir → `apps/server/dist/client/`
 - **后端**：Hono 4（Node.js），SSE + REST API
-- **数据库**：SQLite（sql.js + Drizzle ORM）为默认；支持 PostgreSQL
+- **数据库**：SQLite（node:sqlite + Drizzle ORM，每 commit fsync）为默认；支持 PostgreSQL
 - **AI**：OpenAI 兼容 Chat Completions API + Pi Agent Core
 - **认证**：PIN（PBKDF2 哈希）+ JWT（HttpOnly Cookie 14 天滑动续期）；管理员由 `ADMIN` 环境变量名单指定
 - **共享层**：`@momoi/shared` TS 源码直引，tsup 内联到 server bundle
@@ -100,4 +100,4 @@ PIN（PBKDF2）+ JWT（HttpOnly Cookie 14 天滑动续期）+ IP 速率限制。
 
 ## 数据库
 
-SQLite（sql.js，单文件 `data/momoi.db`）或 PostgreSQL（`DATABASE_URL`）。表结构见 `docs/ARCHITECTURE.md` 的 Schema 章节。
+SQLite（node:sqlite，单文件 `data/momoi.db`，每 commit fsync）或 PostgreSQL（`DATABASE_URL`）。表结构见 `docs/ARCHITECTURE.md` 的 Schema 章节。
