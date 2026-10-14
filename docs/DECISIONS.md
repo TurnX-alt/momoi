@@ -1727,3 +1727,53 @@
 **影响**：本轮 **web 端零改动**，`tailwind.config.js` / `postcss.config.js` / `globals.css` 维持 v3 形态。本决策仅记录评估结论与证据链，避免将来重复实测。
 
 **待补证据**：TW v4 官方浏览器基线的确切数字（Safari/Chrome/Firefox）与 `@config`/`@tailwindcss/upgrade` 工具的官方定义，本次因无联网未核实——上述结论基于本地 lightningcss 源码与编译产物实测，机制层面已锁定，官方数字仅作文档补充，不影响「chrome79 硬冲突」这一判定。参考 `https://tailwindcss.com/docs/upgrade-guide`。
+
+---
+
+## D63：封禁即时生效（修复 JWT 吊销漏洞）+ homura app-kit/auth 换装评估存档
+
+**日期**：2026-10-14
+
+### 第一部分：修复「封禁后 JWT 仍有效」的吊销漏洞
+
+**背景**：调研「换装 homura app-kit/auth」时顺带发现一个独立的真实安全漏洞。`verifyUserToken` 只验签 + 查 `role==='user'`，**不查 `users.banned`**；`userAuthMiddleware` 与 `adminAuthMiddleware` 同样不查。后果：管理员封禁用户后，该用户手上已签发的 JWT **仍能访问全部受保护 API 最长 14 天**；唯一止损手段是轮换 `JWT_SECRET`（误伤所有用户）。此漏洞 `module-auth.md` 旧版曾明文记载（「封禁账号的 token 验证通过但 `/verify` 返回 403」）。
+
+**决策**：新增 `isUserBanned(username)` helper，在 `userAuthMiddleware` 与 `adminAuthMiddleware` 验签成功后、注入身份前**逐请求查库**拦截封禁用户。**不引入服务端会话表**（守住 D32 零状态设计）、**不改前端契约、不改错误码注册表、不改 i18n、不动 PIN/JWT/OAuth 任何现有机制**。
+
+**返回码用 401 而非 403（关键取舍）**：语义上「账户被封禁」更贴切的是 403 `USER_DISABLED`，但实测前端契约（`apps/web/src/lib/api.ts` 的 `handleAuthOn401`）**只有 401 触发会话驱逐**（清会话 + `auth:expired` 事件 → 回登录页），403 不触发。若中间件返 403，用户会卡在「看似登录、但每个请求都失败」的糟糕状态。故中间件返 **401 `AUTH_INVALID_TOKEN`** → 前端驱逐回登录页 → 用户再试登录时 `/verify` 返 **403 `USER_DISABLED`**（`errors.ts` 已注册、i18n 三语已有「账户已被禁用」文案）告知原因。完美复用现有机制。
+
+**不加缓存**：`users.username` 是 TEXT 主键 → 走主键索引，node:sqlite 本地同步查询开销可忽略。加 TTL 缓存会以缓存窗口削弱「即时生效」这一安全目标，故不做。若将来 profiling 证明瓶颈，再作独立优化。
+
+**备选与权衡**：
+- ❌ 引入服务端会话表 / 改用 opaque session id：能精确吊销，但与 D32「零状态、拒绝会话存储」正面冲突，改动面波及全库与前端。
+- ❌ 轮换 `JWT_SECRET` 踢单人：做不到——会误伤所有用户。
+- ✅ 逐请求查库：最小改动（1 helper + 2 中间件各 4 行），零前端影响，即时生效。
+
+**已知局限**（如实记录）：
+1. **活跃 SSE 连接不会被切断**：`/api/events` 是长连接，中间件只在建连时跑一次。封禁用户若已连着 SSE 会继续收到事件直到断线重连。彻底解决需服务端主动踢连接（`lib/realtime.ts` 按 userId 清理 subscriber）——独立一轮。
+2. **仍无「全员强制下线」**：轮换 `JWT_SECRET` 仍是唯一手段。精确全员吊销需服务端会话状态，与 D32 冲突，本轮不碰。
+3. 每请求多一次 DB 主键查询（开销可忽略）。
+
+**影响**：
+- server：`lib/auth.ts`（新增 `isUserBanned` + import 补 `users` + `adminAuthMiddleware` 加检查）、`middleware/userAuth.ts`（加封禁检查 + import）
+- 测试：新增 `test/auth-ban.test.ts`（11 用例）——补上认证层此前**零测试覆盖**的洞（18 个测试文件无一测 auth/jwt/pin）。含「封禁即时生效」核心门禁：签发 token → 访问成功 → 改 banned → 同一 token 立刻被拒 → 解封后恢复。用真实 temp node:sqlite 库（经 `initSqlite` 的 dbPath 注入口），mock 掉 `db/index.js` 以不污染开发库。
+- 文档：`module-auth.md`（banned 字段描述、中间件行为清单、行为约束第 9/10 条）、本决策
+- 前端：**零改动**
+
+### 第二部分：homura app-kit / auth 换装评估——结论不换装（存档）
+
+**背景**：主人提出「momoi 已用 homura db，进一步把 server 骨架换装 `@homurajs/app-kit`、认证换装 `@homurajs/auth`」。做了三路调研 + 亲读源码 + 本机实测。**结论：技术上「装得上」，但性价比极低，不换装。** 此处固化证据链，避免将来重复调研。
+
+**为什么不换（三条硬理由）**：
+
+1. **homura auth 主动抛弃了本地凭据认证**（文档在案）：`docs/heritage/suzuran-lessons.md` 的「明确抛弃」表格列着「自建 OAuth IdP（WebAuthn/密码/授权服务器）」；ADR-007「`OAuth2Client` 只实现标准 code flow」，重开触发条件举例是「设备码」——密码从未进入其设计空间。`OAuth2Client` 全文 108 行、2 个公开方法、构造参数 6 项全必填（不接远程 IdP 无法实例化），无凭据钩子/策略接口。`packages/auth/` 内 grep `password|PIN|credential|pbkdf2` 与 `role|isAdmin` 均零命中。→ momoi 的 PIN 认证在 homura auth 里无任何对应物。
+
+2. **换完 momoi 仍是「自管认证」，只是 session 层更重**：`SessionManager` 确能脱离 `OAuth2Client` 独立签发（源码零 oauth2 import），但代价是——单 cookie → 双 cookie（`homura_at`+`homura_rt`）、零状态 → 必需 `refresh_tokens` 表（违背 D32）、`c.set('userId',username)` → `c.set('auth',claims)`（约 40 处 handler 要改）、`AuthUser` 是封闭类型无 admin 位（仍得自己查表）、客户端续期 → 服务端透明 rotate（前端 62 行调度器作废）、错误 wire 从 `{code}` → `{error}`（破坏前端 `toApiError`）。而 PIN 校验、`X-User` 头、cookie 落地、rate limiter、5 个 PIN 端点、is_admin 判定全得 momoi 自己留着。且 homura 模板前端无任何凭据提交范式可抄、PIN 式接入在其 hono 集成层是未测试区域、auth 链自身尚未经真实 IdP 验证（支持矩阵标 🟡）。
+
+3. **app-kit 最值钱的部分 momoi 用不上，且换装有隐藏回退**：momoi 永远 standalone，app-kit 核心价值「双形态适配 / qw-pages / PostgREST」完全用不上。好消息（两个曾担心的冲突被证伪）：createApp 不注册 cors、onError 可注入、静态服务用 `createReadStream` 而非 `serve-static`（不重引入 Windows+tsx 挂起 bug）、`app` 是标准 Hono 可继续挂路由（渐进接入）。但三处实质回退：① 丢 brotli/gzip 预压缩（app-kit static 无协商，momoi 的 compressionPlugin 产物永不被服务）；② `sw.js` 被误设 immutable 1 年（`urlPath.includes('.')` 判定，阻断 Service Worker 自更新）；③ CORS 顺序陷阱（Hono trie-router 按插入序定优先级，createApp 后注册的 `use('*',cors)` 作用于不了经 routes 参数传入的路由）。附带 assetsDir 锚定 cwd 与 momoi 的 REPO_ROOT 锚定错位。
+
+**身份模型的根本差异**（将来真要换的前置条件）：momoi 身份主键是 `users.username`（TEXT PK）**且可变**（`/rename` 级联更新 5 张表），业务表 `user_id` 存的都是用户名字符串；homura `AuthUser.sub` 是 opaque 稳定标识。username 一变，已签发 session 的 sub 就与 users 表脱钩 → 必须先引入稳定 user id 或接受 rename 后强制重登。
+
+**战略层错位**（最根本）：homura PRD 定位是「AI Agent 按模板快速产出的轻应用，最终用户是钉钉组织内成员，派生式消费」；momoi 是成熟自托管产品（15+ 路由、双 IM、Pi Agent、技能系统、VRM），最终用户是 PIN 自注册用户。与 D61 先例一致：momoi 对 homura 生态的既定取向是**取基础设施层（db），不交骨架与认证**。
+
+**将来重评的触发条件**（满足其一可重启）：① momoi 需要 qw-pages 部署；② 放弃 PIN 改纯外部 IdP；③ 引入稳定 user id 取代可变 username 主键；④ homura auth 链完成真实 IdP 端到端验证。

@@ -82,7 +82,7 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 | `pin_hash` | PBKDF2 哈希串，空字符串 = 未设置 PIN |
 | `first_login_at` | 首次登录时间戳 |
 | `last_login_at` | 最近登录时间戳 |
-| `banned` | 是否封禁（封禁账号的 token 验证通过但 `/verify` 返回 403） |
+| `banned` | 是否封禁。**封禁即时生效**：中间件在验签后二次查库，封禁账号的 token 一律 401 拒绝（见〈行为约束〉第 9 条）；`/verify` 另在 PIN 验证通过后检查该字段返回 403 |
 
 `trackUserLogin(username)` 内部：已有用户则 UPDATE `last_login_at`，新用户则 INSERT 空 `pin_hash` 行（纯占位，表示该用户名已被占用）。
 
@@ -157,14 +157,15 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 
 | 导出位置 | 是否被路由使用 | 行为 |
 |---|---|---|
-| `apps/server/src/middleware/userAuth.ts`（用户） | 是（chat / conversations / upload / workspace + user 的 `/me`、`/refresh`、`/rename`、`/oauth-bindings`） | 从 HttpOnly Cookie `momoi_token` 提取 JWT 并验签 |
-| `apps/server/src/auth.ts` 的 `adminAuthMiddleware`（管理员） | 是（admin 路由） | 同上取 token，另加 `ADMIN` 名单校验（401/403） |
+| `apps/server/src/middleware/userAuth.ts`（用户） | 是（chat / conversations / upload / workspace + user 的 `/me`、`/refresh`、`/rename`、`/oauth-bindings`） | 从 HttpOnly Cookie `momoi_token` 提取 JWT 并验签，再查封禁状态 |
+| `apps/server/src/lib/auth.ts` 的 `adminAuthMiddleware`（管理员） | 是（admin 路由） | 同上取 token + 查封禁，另加 `ADMIN` 名单校验（401/403） |
 
 **实际行为**：
 
 1. Token 来源：HttpOnly Cookie `momoi_token`（`getAuthToken()` 唯一来源）
-2. 缺失或无效 → `401`
-3. 成功则 `c.set('userId', username)` 并 `await next()`
+2. 缺失 → `401 UNAUTHORIZED`；无效/过期 → `401 AUTH_INVALID_TOKEN`
+3. **封禁检查**：`isUserBanned(username)` 查 `users.banned`，已封禁 → `401 AUTH_INVALID_TOKEN`
+4. 成功则 `c.set('userId', username)` 并 `await next()`
 
 `/api/user/status`、`/verify`、`/set-pin`、`/change-pin` 端点不经过任何认证中间件（登录前无 token），改为在 handler 内直接读取 `x-user` 头解析用户名。
 
@@ -288,5 +289,6 @@ PIN 及相关用户数据不再使用 `settings` 键值对存储，而是在 `us
 6. **认证 ≠ 授权**：JWT 只证明「是谁」，不证明「有权访问这条数据」。所有涉及具体资源的端点必须在 handler 内二次校验 `user_id` 归属（见 `chat.ts`、`conversations.ts` 的 `and(eq(id), eq(user_id, userId))` 查询），越权一律返回 404 而非 403（不泄露资源是否存在）
 7. **401 自动驱逐**：前端 `lib/api.ts` / SSE 层收到 401 时触发 `window.dispatchEvent(new CustomEvent('auth:expired'))`，`App.tsx` 监听该事件→清空本地会话标记（username、过期时间）→回到登录页。HttpOnly Cookie 无法被 JS 清除，由 `/logout` 端点或自然过期处理。403（非管理员）不触发驱逐
 8. **前端路由守卫**：`#/settings` 仅对 `/me` 返回 `is_admin: true` 的用户开放；其他用户（含未登录）访问该 hash 会被 `replaceState` 遣返首页。守卫只是体验层，真正的屏障是第 4 条的服务端鉴权
-9. **续期不等于吊销**：`/refresh` 只换发新 token，旧 token 在其过期前依然有效（无服务端会话表）。需要强制全员下线时，更换 `JWT_SECRET` 或删除 `settings` 表的 `jwt_secret` 行后重启
-10. **封禁用户拦截**：`POST /api/user/verify` 在 PIN 验证通过后、签发 JWT 前检查 `users.banned` 字段，封禁用户返回 `403 Account is disabled`。封禁不阻止 `change-pin`（不影响已登录用户）
+9. **单用户吊销已支持；全员吊销仍需轮换密钥**：JWT 无状态、签发后无法从中吊销，故**逐请求查库**实现单用户封禁即时生效（`isUserBanned`，见〈中间件实现〉）——无需会话表，守住 D32 的零状态设计。`/refresh` 仍只换发新 token、旧 token 到自身过期前有效，但封禁会同时拦住新旧 token。需要**强制全员下线**时仍须更换 `JWT_SECRET` 或删除 `settings` 表的 `jwt_secret` 行后重启（会误伤所有用户）。
+   - ⚠ 已知局限：**活跃 SSE 连接不会被切断**——`/api/events` 是长连接，中间件只在建连时跑一次。封禁用户若已连着 SSE，会继续收到事件直到断线重连。彻底解决需服务端主动踢连接（`lib/realtime.ts` 按 userId 清理 subscriber）。
+10. **封禁用户拦截（两道）**：① `POST /api/user/verify` 在 PIN 验证通过后、签发 JWT 前检查 `users.banned`，封禁用户返回 `403 Account is disabled`；② 认证中间件对**已持有 token** 的封禁用户返回 `401 AUTH_INVALID_TOKEN`（前端驱逐 → 回登录页 → 再试登录才看到 403 的原因）。封禁不阻止 `change-pin`（不影响已登录用户）
