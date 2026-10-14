@@ -1694,3 +1694,36 @@
 - 文档：本决策 + D2/D39 交叉引用标注；`module-database.md`（引擎/持久化/外键/迁移/依赖全面更新）、`ARCHITECTURE.md`、`PRD.md`、`module-config.md`、`module-prompt-engine.md`、`AGENTS.md`、`README.md`、`.env.example`
 - 部署：`node:sqlite` 要求 Node ≥ 22.5（生产 v26 已满足）；无原生模块编译、无 WASM 资产
 - 详见 `docs/specs/module-database.md`
+
+---
+
+## D62：Tailwind CSS v4 评估——因钉钉 WebView 硬约束暂不升级
+
+**日期**：2026-10-14
+
+**背景**：TW v4（v3 → v4）带来 CSS-first 配置、原生 cascade layers、更快的构建等收益，计划升级 web 端。升级前做了可行性实测，结论是**与 momoi 现有的浏览器兼容策略硬冲突**，本轮不升。
+
+**结论**：保持 Tailwind v3（`^3.4.19`），不升级 v4。v3 仍在维护，前端运行稳定，零风险。
+
+**决定性证据（本机实测，非记忆）**：TW v4.3.3 编译产物（`@import "tailwindcss"` 最小样本）**第一行即 `@layer theme, base, components, utilities;`**，且含 `color-mix()`（透明度修饰符 `bg-primary/50` 的实现方式）、`:is()`。用 **lightningcss（TW v4 的底层引擎）以 `targets: chrome>=79` 降级**后：
+
+| 产物特性 | Chrome 最低支持 | lightningcss 能否降级 | chrome79 后果 |
+|---|---|---|---|
+| `@layer`（cascade layers） | 99+ | ❌ **引擎降级清单里根本没有 cascade-layers 项** | 整块被忽略 → **所有工具类层叠优先级塌陷，样式全乱** |
+| `color-mix()`（走 `var()` 的透明度） | 111+ | ❌ 编译期无法对运行时 `var()` 静态求值 | 透明度类失效 |
+| `:is()` | 88+ | ✅ 可补 `-webkit-any()` polyfill | 非主要矛盾 |
+
+对照组已验证降级引擎确实生效（成功展开 CSS 嵌套、`lab()`→`#bf5700`、`:is()`→`-webkit-any`），故上表可信。`@layer` 是 v4 的**架构地基**（utilities 覆盖 base 全靠它），无法用配置绕过；`cssTarget` / autoprefixer / `@tailwindcss/postcss` 全建在 lightningcss 之上，都拿不到 unlayer 能力。
+
+**冲突根源**：momoi web 端为**钉钉 Android 内置浏览器（内核 < Chrome 104）深度优化**，`vite.config.ts` 锁 `cssTarget: 'chrome79'`。这不是随手设的，是成体系的硬约束——移动端判定走 JS 绕开媒体查询（`App.tsx`）、图表色板解析成具体值而非 `var()`（`palette.ts`）、SSE 只用 data-only 格式（见 D38）、`dvh`/`@property` 均有 `@supports` 兜底（`globals.css`）。TW v4 的 `@layer` 基线（Chrome 99+）与之无解冲突。
+
+**权衡**：
+- ❌ 升 v4 + 放弃钉钉老 WebView：等于牺牲一个真实 IM 集成入口的 UI 可用性，产品取舍不划算
+- ❌ 升 v4 + 手写 PostCSS 强拆 `@layer` + 静态化颜色：lightningcss 不提供，需自造降级插件，成熟度与维护成本未知，违背「用官方机制」原则
+- ✅ 保持 v3：零风险；待钉钉内置浏览器内核升级（或 momoi 放弃该入口）后再评估
+
+**触发重评的条件**（满足其一即可重启升级评估）：① 钉钉 Android 内置浏览器内核升至 Chrome 111+；② momoi 明确放弃钉钉 WebView 作为 UI 宿主（仅保留 IM 渠道）；③ TW 官方或 lightningcss 提供 cascade-layers 降级能力。
+
+**影响**：本轮 **web 端零改动**，`tailwind.config.js` / `postcss.config.js` / `globals.css` 维持 v3 形态。本决策仅记录评估结论与证据链，避免将来重复实测。
+
+**待补证据**：TW v4 官方浏览器基线的确切数字（Safari/Chrome/Firefox）与 `@config`/`@tailwindcss/upgrade` 工具的官方定义，本次因无联网未核实——上述结论基于本地 lightningcss 源码与编译产物实测，机制层面已锁定，官方数字仅作文档补充，不影响「chrome79 硬冲突」这一判定。参考 `https://tailwindcss.com/docs/upgrade-guide`。
