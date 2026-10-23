@@ -17,6 +17,10 @@ export interface ChatMessage {
     function: { name: string; arguments: string }
   }>
   tool_call_id?: string
+  /** 思考模式端点的思考内容回传（DeepSeek 等）：带 tool_calls 的 assistant 消息
+   *  缺少该字段会被上游 400 拒绝（"reasoning_content ... must be passed back"），
+   *  空串亦被接受。由 piMessagesToChatMessages 从 thinking 块带出。 */
+  reasoning_content?: string
   /** 群聊：该消息由哪个 Agent 产生（用于上下文身份还原） */
   agent_id?: string | null
   /** Unix 时间戳（秒），用于计算 Agent 上一次发言时间等 */

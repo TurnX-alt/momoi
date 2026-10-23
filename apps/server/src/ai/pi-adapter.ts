@@ -319,11 +319,20 @@ async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
   // 动态注入 MCP 工具（懒加载，首次或缓存过期时拉取）
   try {
     const mcpServers = await getMcpTools()
+    // OpenAI 兼容端点的 function.name 仅允许 [a-zA-Z0-9_-]：MCP 服务器名里的中文/
+    // 斜杠（如「钉钉/xxx」）会让整条请求 400（Invalid 'tools[N].function.name'），
+    // 所有对话随即退化为空回复。对外暴露安全名，调用仍用 MCP 原始工具名。
+    const usedToolNames = new Set(tools.map((t) => t.name))
     console.log(`[mcp] createToolAdapter: ${mcpServers.length} MCP server(s) with ${mcpServers.reduce((s,x) => s + x.tools.length, 0)} total tools`)
     for (const server of mcpServers) {
       for (const mcpTool of server.tools) {
-        const prefixedName = `${server.serverName}/${mcpTool.name}`
-        console.log(`[mcp]   → ${prefixedName}`)
+        const safeServer = server.serverName.replace(/[^a-zA-Z0-9_-]/g, '_')
+        const safeTool = mcpTool.name.replace(/[^a-zA-Z0-9_-]/g, '_')
+        const baseName = `${safeServer}_${safeTool}`
+        let prefixedName = baseName
+        for (let i = 2; usedToolNames.has(prefixedName); i++) prefixedName = `${baseName}_${i}`
+        usedToolNames.add(prefixedName)
+        console.log(`[mcp]   → ${prefixedName} (${server.serverName}/${mcpTool.name})`)
         const schema = mcpTool.inputSchema.properties
           ? jsonSchemaToTypeBox(mcpTool.inputSchema.properties, mcpTool.inputSchema.required || [])
           : Type.Object({})
@@ -375,7 +384,7 @@ async function createToolAdapter(toolCtx: ToolContext): Promise<AgentTool[]> {
 }
 
 // ---- Pi Message → ChatMessage 转换（streamFn 内部使用）----
-function piMessagesToChatMessages(msgs: Message[]): ChatMessage[] {
+export function piMessagesToChatMessages(msgs: Message[]): ChatMessage[] {
   return msgs.map((msg): ChatMessage => {
     switch (msg.role) {
       case 'user': {
@@ -397,10 +406,22 @@ function piMessagesToChatMessages(msgs: Message[]): ChatMessage[] {
           type: 'function' as const,
           function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
         }))
+        // 思考模式端点（DeepSeek 等）要求思考内容随 assistant 消息回传：
+        // 带 tool_calls 的消息缺 reasoning_content 时下一轮直接 400
+        // （"The reasoning_content in the thinking mode must be passed back to the API."），
+        // 空串也被接受。此前 thinking 块被整体丢弃，导致「模型调工具 → 后续轮次全空
+        // → 空回复重试耗尽 → 兜底文案落库」的连锁失败。
+        const thinking = blocks
+          .filter((b): b is ThinkingContent => b.type === 'thinking')
+          .map((b) => b.thinking)
+          .join('\n')
+          .trim()
+        const reasoning = thinking || (toolCalls.length > 0 ? '' : undefined)
         return {
           role: 'assistant',
           content: textParts.join('') || null,
           tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+          ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}),
         }
       }
       case 'toolResult': {
