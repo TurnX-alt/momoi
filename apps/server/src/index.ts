@@ -44,6 +44,7 @@ import { memoriesRoute } from './routes/memories.js'
 import { pushNotificationRoute } from './routes/push-notification.js'
 import { serveClient } from './lib/static.js'
 import { startWechatPoller } from './im/wechat/poller.js'
+import { startWorkBuddyKeeper } from './ai/workbuddy/token-manager.js'
 import { initQqBots } from './im/qq/manager.js'
 
 const app = new Hono()
@@ -105,6 +106,9 @@ serve({
 
 // Start WeChat message poller (non-blocking, timer-based)
 startWechatPoller()
+
+// WorkBuddy 凭证后台自动轮换（非阻塞；无凭证时每分钟只做一次空查询）
+startWorkBuddyKeeper()
 
 // Restore QQ bot gateway connections for all bound users (non-blocking)
 void initQqBots().catch((e) => console.error('[qq] restore failed:', e instanceof Error ? e.message : e))

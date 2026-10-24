@@ -277,6 +277,7 @@ export enum ErrCode {
   // 无 params：api_key 的模板不得有任何插值位，否则值会被回显进错误消息
   CONFIG_IMPORT_BAD_API_KEY = 'CONFIG_IMPORT_BAD_API_KEY',
   CONFIG_IMPORT_BAD_CONTEXT_WINDOW = 'CONFIG_IMPORT_BAD_CONTEXT_WINDOW',
+  CONFIG_IMPORT_BAD_GATEWAY_SOURCE = 'CONFIG_IMPORT_BAD_GATEWAY_SOURCE',
 }
 
 /** 每码元数据：默认 HTTP status + i18n 模板参数名（全有或全无） */
@@ -485,6 +486,7 @@ export const ERR_REGISTRY: Readonly<Record<ErrCode, ErrMeta>> = {
   [ErrCode.CONFIG_IMPORT_BAD_API_ENDPOINT]: { status: 400 },
   [ErrCode.CONFIG_IMPORT_BAD_API_KEY]: { status: 400 },
   [ErrCode.CONFIG_IMPORT_BAD_CONTEXT_WINDOW]: { status: 400 },
+  [ErrCode.CONFIG_IMPORT_BAD_GATEWAY_SOURCE]: { status: 400 },
 }
 
 /** REST 错误响应体（唯一形状；code 放宽为 string 以容忍未知码） */

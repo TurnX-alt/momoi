@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { PanelLeft, Plus, RotateCcw, Upload } from 'lucide-react'
@@ -11,6 +11,7 @@ import { McpManager, type McpManagerHandle } from './tabs/McpManager'
 import { SkillManager, type SkillManagerHandle } from './tabs/SkillManager'
 import { ReviewPanel } from './tabs/ReviewPanel'
 import { UserManager, type UserManagerHandle } from './tabs/UserManager'
+import type { GatewaySource } from '@momoi/shared/types'
 
 interface AdminPanelMainProps {
   activeTab: string
@@ -33,6 +34,9 @@ export function AdminPanelMain({ activeTab, standAlone, sidebarOpen, setSidebarO
   const gatewayRef = useRef<GatewaySettingsHandle>(null)
   const mcpRef = useRef<McpManagerHandle>(null)
   const skillRef = useRef<SkillManagerHandle>(null)
+  // 网关智能源决定右上角动作：仅自配置时提供「从环境变量加载」；
+  // WorkBuddy 的登录入口在凭证面板内，头部不再显示任何动作。
+  const [gatewaySource, setGatewaySource] = useState<GatewaySource>('custom')
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
@@ -52,7 +56,7 @@ export function AdminPanelMain({ activeTab, standAlone, sidebarOpen, setSidebarO
               {t('settings.agentAdd')}
             </Button>
           )}
-          {activeTab === 'gateway' && (
+          {activeTab === 'gateway' && gatewaySource === 'custom' && (
             <Button variant="outline" size="sm" onClick={() => gatewayRef.current?.loadFromEnv()}>
               <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
               {t('settings.gatewayLoadFromEnv')}
@@ -75,7 +79,7 @@ export function AdminPanelMain({ activeTab, standAlone, sidebarOpen, setSidebarO
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl mx-auto px-6 pb-8">
           {activeTab === 'agent' && <AgentManager ref={agentRef} />}
-          {activeTab === 'gateway' && <GatewaySettings ref={gatewayRef} />}
+          {activeTab === 'gateway' && <GatewaySettings ref={gatewayRef} onSourceChange={setGatewaySource} />}
           {activeTab === 'config' && <ConfigTransfer />}
           {activeTab === 'experience' && <ExperienceSettings />}
           {activeTab === 'mcp' && <McpManager ref={mcpRef} />}

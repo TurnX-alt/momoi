@@ -222,10 +222,16 @@ export interface OAuth2Provider {
   scopes: string
 }
 
+/** 网关智能源：custom = 管理员自配置的 OpenAI 兼容端点；workbuddy = 内置 WorkBuddy
+ *  智能源（凭证由服务端托管并后台自动轮换，见 apps/server/src/ai/workbuddy/）。 */
+export type GatewaySource = 'custom' | 'workbuddy'
+
 export interface AppConfig {
   app_name: string
   app_favicon: string  // base64 data URL, empty = use default
   app_background: string  // base64 data URL, empty = no custom background
+  /** 网关智能源；custom 时 api_endpoint/api_key 生效，workbuddy 时由内置转发器接管 */
+  gateway_source: GatewaySource
   api_endpoint: string
   api_key: string
   /** 模型上下文窗口大小（tokens）：会话状态条「上下文（已用）%」的分母。
@@ -240,6 +246,30 @@ export interface AppConfig {
   /** 聊天常用追问（最多 5 条，非空对话输入框上方气泡） */
   followup_questions: string[]
   oauth_providers: OAuth2Provider[]
+}
+
+// ---- WorkBuddy 智能源 ----
+
+/** WorkBuddy 凭证状态（不含任何 token 明文，仅用于管理端展示） */
+export interface WorkBuddyStatus {
+  logged_in: boolean
+  /** access token 是否已过期（过期后由后台轮换或需重新登录） */
+  expired?: boolean
+  uid?: string
+  nickname?: string
+  domain?: string
+  expires_at?: string
+  refresh_expires_at?: string
+  has_refresh_token?: boolean
+  /** 后台是否启用自动轮换 */
+  auto_refresh: boolean
+}
+
+/** 一次网页登录会话的进度 */
+export interface WorkBuddyLoginStatus {
+  status: 'idle' | 'pending' | 'success' | 'failed'
+  message?: string
+  credential?: WorkBuddyStatus
 }
 
 // ---- Agent ----
@@ -277,6 +307,8 @@ export interface ConfigTransferAgent {
  * 覆盖目标实例的 .env。详见 docs/specs/module-config.md 的导入导出章节。
  */
 export interface ConfigExportGateway {
+  /** 智能源（custom / workbuddy）。凭证本身不可迁移：workbuddy 导入后仍需在网关页登录。 */
+  gateway_source?: GatewaySource
   api_endpoint?: string
   api_key?: string
   context_window?: number

@@ -95,11 +95,17 @@ function parseContextWindow(raw: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 128000
 }
 
+/** 智能源取值收口：只有显式的 workbuddy 才切换，其余（缺失/未知）一律 custom */
+function parseGatewaySource(raw: string | undefined): AppConfig['gateway_source'] {
+  return raw === 'workbuddy' ? 'workbuddy' : 'custom'
+}
+
 function buildConfig(map: Map<string, string>): AppConfig {
   return {
     app_name: map.get('app_name') || DEFAULT_APP_NAME,
     app_favicon: map.get('app_favicon') || '',
     app_background: map.get('app_background') || '',
+    gateway_source: parseGatewaySource(map.get('gateway_source')),
     api_endpoint: map.get('api_endpoint') || env.OPENAI_BASE_URL,
     api_key: map.get('api_key') || env.OPENAI_API_KEY,
     support_attachments: map.get('support_attachments') !== 'false',
@@ -133,6 +139,9 @@ export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConf
       let stored: string
       if (jsonKeys.includes(key)) {
         stored = JSON.stringify(value)
+      } else if (key === 'gateway_source') {
+        // 落库前同样收口，避免脏值在 DELETE/迁移时被当成「已配置」
+        stored = value === 'workbuddy' ? 'workbuddy' : 'custom'
       } else if (numberKeys.includes(key)) {
         stored = String(value)
       } else if (boolKeys.includes(key)) {

@@ -1,0 +1,102 @@
+# Spec — WorkBuddy 智能源
+
+## 概述
+
+网关的第二种智能源：管理员在「后台 → 网关 → 智能源」选择 **WorkBuddy** 后，
+Momoi 不再使用自配置的 OpenAI 兼容端点，而是把对话请求转发到 WorkBuddy 官方网关
+（`https://copilot.tencent.com`），使用管理员本人的 WorkBuddy 账号凭证。
+
+凭证由 **服务端** 持有并**后台自动轮换**，前端只看到登录状态、账号与有效期，
+任何 token 都不下发浏览器、不写入日志。
+
+## 涉及文件
+
+| 文件 | 职责 |
+|---|---|
+| `apps/server/src/ai/workbuddy/config.ts` | 网关端点、客户端身份头版本、轮换与登录超时常量（可用环境变量覆盖） |
+| `apps/server/src/ai/workbuddy/web-login.ts` | state 握手 → 轮询换票 → 取账号（自包含网页登录，不依赖 WorkBuddy App） |
+| `apps/server/src/ai/workbuddy/credentials.ts` | 凭证落 `settings` 表，AES-256-GCM 加密（`aesgcm:v1:` 信封） |
+| `apps/server/src/ai/workbuddy/token-manager.ts` | 缓存 → 存储 → 续期编排、登录会话状态机、后台轮换 keeper |
+| `apps/server/src/ai/workbuddy/chat.ts` | 对话转发（认证头 / 401 重试 / 链路头） |
+| `apps/server/src/routes/workbuddy.ts` | 管理端点（状态 / 登录 / 登录进度 / 退出） |
+| `apps/server/src/ai/provider.ts` | `gateway_source=workbuddy` 时把请求交给 `chat.ts`，解析逻辑不变 |
+| `apps/web/src/components/admin/tabs/GatewaySettings.tsx` | 智能源选择 + 凭证面板 + 登录轮询 |
+| `apps/web/src/components/admin/AdminPanelMain.tsx` | 右上角动作随智能源切换（仅自配置时显示「从环境变量加载」，WorkBuddy 时不显示） |
+
+## 登录流程
+
+```
+POST /api/admin/workbuddy/login
+  → 服务端 POST {authBase}/v2/plugin/auth/state?platform=workbuddy
+      （带 X-No-Authorization / X-No-User-Id 等「未登录」标记头）
+  → 返回 { auth_url, state }，前端 window.open(auth_url)
+  → 管理员在腾讯托管页完成登录（扫码 / 账密，服务端不经手口令）
+  → 服务端后台轮询 GET {authBase}/v2/plugin/auth/token?state=…
+      未完成：HTTP 200 + code 11217（pending）
+      完成：  HTTP 200 + code 0 + accessToken / refreshToken / expiresIn …
+  → GET {authBase}/v2/plugin/account（Bearer）取 uid / nickname
+  → 凭证加密落库，前端轮询 /login/status 拿到 success
+```
+
+- 握手与换票都在服务端完成，前端只负责打开浏览器；页面关闭不影响登录完成
+- 登录会话 5 分钟超时；服务端连续 5 次换票异常判失败（网络抖动会重试）
+- 密码/扫码全程在腾讯页面，Momoi 不接收、不存储任何口令
+
+## 凭证存储与轮换
+
+- 落库键：`workbuddy_credential`；加密密钥：`workbuddy_store_key`（首次使用生成）
+- 信封格式：`aesgcm:v1:<iv>:<tag>:<ciphertext>`（base64url），明文不落库、不上 wire
+- 取票顺序：内存缓存 → 加密存储 → refresh 续期；续期失败/无凭证时返回可读提示
+- **后台自动轮换**：`startWorkBuddyKeeper()` 随服务启动，每 60s 巡检一次；access token
+  进入到期前 5 分钟窗口即用 refresh token 续期。**refresh token 每次续期都会轮换**，
+  续期结果立即加密写回，避免重启后拿已失效的旧票
+- 巡检不以「当前是否选中 WorkBuddy」为前提：只要本地有凭证就续期，防止
+  「已登录但尚未保存配置」期间凭证悄悄过期
+
+## 可选环境变量
+
+协议适配用的覆盖项（通常无需设置；WorkBuddy 客户端升级时才可能需要调整）：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `WORKBUDDY_BASE_URL` | `https://copilot.tencent.com` | 推理网关（对话 / 续期） |
+| `WORKBUDDY_AUTH_BASE_URL` | `https://www.workbuddy.cn` | 登录网关（握手 / 换票 / 账号） |
+| `WORKBUDDY_DOMAIN` | `www.workbuddy.cn` | 请求头 `X-Domain` |
+| `WORKBUDDY_IDE_VERSION` | `5.8.3` | 伪装客户端版本（`User-Agent` / `X-IDE-Version`） |
+| `WORKBUDDY_REFRESH_AHEAD_MS` | `300000` | access token 提前续期窗口 |
+| `WORKBUDDY_KEEPALIVE_MS` | `60000` | 后台巡检间隔 |
+| `WORKBUDDY_LOGIN_TIMEOUT_MS` | `300000` | 网页登录超时 |
+
+## 转发行为
+
+- 始终以上游流式请求（网关非流式返回 `400 / code 11101`）；Momoi 的
+  `streamChatCompletion` 本就是流式，SSE 解析与工具调用聚合完全复用
+- 不发送 `enable_thinking` / `thinking_budget`（非 WorkBuddy 规范字段）
+- 上游 401/403：强制续期后重试一次；仍失败则把上游响应交给既有错误链路
+- 无凭证：抛 `AI_UPSTREAM_ERROR`，提示管理员到网关页登录
+
+## 接口契约
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/admin/workbuddy/status` | `{ logged_in, expired?, uid?, nickname?, expires_at?, refresh_expires_at?, has_refresh_token?, auto_refresh }` |
+| POST | `/api/admin/workbuddy/login` | 发起登录 → `{ auth_url, state }` |
+| GET | `/api/admin/workbuddy/login/status` | `{ status: 'idle' \| 'pending' \| 'success' \| 'failed', message?, credential? }` |
+| POST | `/api/admin/workbuddy/logout` | 清除本地凭证 → `{ success: true }` |
+
+全部端点位于 `adminAuthMiddleware` 之后（`/api/admin/workbuddy*`）。
+
+## 行为约束
+
+1. **token 永不下发**：状态与日志只包含 uid / 昵称 / 时间戳与 token 存在性
+2. **凭证全局唯一**：与 `api_key` 同级，一次登录全站生效
+3. **不读取本机 WorkBuddy App 登录态**：仅走网页登录，避免绑定特定机器与 App 版本
+4. **失败可恢复**：续期失败只影响 WorkBuddy 智能源，切回 `custom` 不受影响
+5. **模型名由管理员指定**：智能体里的 `model` 填 WorkBuddy 模型 ID（如 `glm-5.3`）
+
+## 验收标准
+
+- 选择 WorkBuddy 后，API 端点/密钥输入框消失，出现凭证面板；右上角「从环境变量加载」按钮一并隐藏（登录入口在凭证面板内）
+- 点击登录 → 浏览器打开腾讯登录页 → 完成后凭证面板显示「已登录 + 账号 + 有效期」
+- 服务端重启后无需重新登录；access token 临近过期时表内凭证自动更新（refresh token 轮换）
+- 退出登录后状态回到「未登录」，对话请求给出「请先登录」的可读错误

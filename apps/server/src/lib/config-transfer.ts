@@ -26,7 +26,7 @@ export const BUNDLE_VERSION = 1
 export const MAX_IMPORT_BYTES = 10 * 1024 * 1024
 
 const EXPERIENCE_KEYS = ['app_name', 'app_favicon', 'app_background', 'show_github', 'recommended_questions', 'followup_questions'] as const
-const GATEWAY_KEYS = ['api_endpoint', 'api_key', 'context_window', 'support_attachments', 'support_infinite_mode', 'use_external_image_hosting', 'allow_im_conversations'] as const
+const GATEWAY_KEYS = ['gateway_source', 'api_endpoint', 'api_key', 'context_window', 'support_attachments', 'support_infinite_mode', 'use_external_image_hosting', 'allow_im_conversations'] as const
 const AGENT_KEYS = ['id', 'role', 'name', 'model', 'system_prompt', 'avatar'] as const
 const PROVIDER_KEYS = ['id', 'name', 'client_id', 'client_secret', 'authorize_url', 'token_url', 'userinfo_url', 'scopes'] as const
 
@@ -75,6 +75,7 @@ export async function buildExportBundle(deps?: TransferDeps): Promise<ConfigExpo
     exported_at: new Date().toISOString(),
     // 手工挑白名单字段——绝不整体序列化 AppConfig（其余键如 tts_*、JWT/VAPID 不在导出范围）
     gateway: {
+      gateway_source: config.gateway_source,
       api_endpoint: config.api_endpoint,
       api_key: config.api_key,
       context_window: config.context_window,
@@ -222,6 +223,14 @@ function validateGateway(v: unknown, errors: ImportIssue[]): ConfigExportGateway
     }
     const val = v[key]
     switch (key) {
+      case 'gateway_source': {
+        if (val !== 'custom' && val !== 'workbuddy') {
+          errors.push({ path: 'gateway.gateway_source', code: ErrCode.CONFIG_IMPORT_BAD_GATEWAY_SOURCE })
+        } else {
+          out.gateway_source = val
+        }
+        break
+      }
       case 'api_endpoint': {
         // 不校验 URL 形态：PUT /api/admin/config 本身零校验，且 .env 里
         // `localhost:11434/v1` 这类无 scheme 写法很常见——强制 http(s) 会让

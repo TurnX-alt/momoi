@@ -37,6 +37,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     app_name: 'Momoi',
     app_favicon: '',
     app_background: '',
+    gateway_source: 'custom',
     api_endpoint: 'https://api.openai.com/v1',
     api_key: 'sk-secret',
     context_window: 128000,
@@ -481,7 +482,7 @@ describe('validateImportBundle — users', () => {
 // ---- 导出 / 往返 ----
 
 describe('buildExportBundle + stringify + parse 往返', () => {
-  it('导出含 gateway 七字段（api_key/api_endpoint 明文），仍不含 voice_/created_at', async () => {
+  it('导出含 gateway 八字段（api_key/api_endpoint 明文），仍不含 voice_/created_at', async () => {
     const fx = makeDeps()
     const bundle = await buildExportBundle(fx.deps)
     const text = stringifyExportYAML(bundle)
@@ -493,6 +494,7 @@ describe('buildExportBundle + stringify + parse 往返', () => {
     // 段级白名单：整体序列化 AppConfig 会带出 tts_* 等未导出键
     expect(Object.keys(bundle).sort()).toEqual(['agents', 'experience', 'exported_at', 'gateway', 'users', 'version'])
     expect(bundle.gateway).toEqual({
+      gateway_source: 'custom',
       api_endpoint: 'https://api.openai.com/v1',
       api_key: 'sk-secret',
       context_window: 128000,
@@ -547,9 +549,10 @@ describe('buildExportBundle + stringify + parse 往返', () => {
 // ---- gateway 段 ----
 
 describe('validateImportBundle — gateway', () => {
-  it('合法七字段全通过', () => {
+  it('合法八字段全通过', () => {
     const r = validateYAML(`
 gateway:
+  gateway_source: workbuddy
   api_endpoint: https://api.openai.com/v1
   api_key: sk-live
   context_window: 64000
@@ -560,6 +563,7 @@ gateway:
 `)
     expect(r.ok).toBe(true)
     expect(r.bundle?.gateway).toEqual({
+      gateway_source: 'workbuddy',
       api_endpoint: 'https://api.openai.com/v1',
       api_key: 'sk-live',
       context_window: 64000,
@@ -583,6 +587,19 @@ gateway:
     expect(codes(r.errors)).toEqual([ErrCode.CONFIG_IMPORT_UNKNOWN_GATEWAY_KEY])
     expect(r.errors[0].path).toBe('gateway.api_key2')
     expect(r.errors[0].params).toEqual({ key: 'api_key2' })
+  })
+
+  it('gateway_source：仅 custom / workbuddy 通过，其余拒绝', () => {
+    for (const bad of ['openai', '""', 'WorkBuddy', '123']) {
+      const r = validateYAML(`gateway:\n  gateway_source: ${bad}\n`)
+      expect(codes(r.errors), `gateway_source: ${bad}`).toEqual([ErrCode.CONFIG_IMPORT_BAD_GATEWAY_SOURCE])
+      expect(r.errors[0].path).toBe('gateway.gateway_source')
+    }
+    for (const good of ['custom', 'workbuddy']) {
+      const r = validateYAML(`gateway:\n  gateway_source: ${good}\n`)
+      expect(r.ok, `gateway_source: ${good}`).toBe(true)
+      expect(r.bundle?.gateway?.gateway_source).toBe(good)
+    }
   })
 
   it('api_endpoint：空串/超长拒绝；无 scheme 形态放行（与 PUT /config 的零校验一致）', () => {
