@@ -1777,3 +1777,36 @@
 **战略层错位**（最根本）：homura PRD 定位是「AI Agent 按模板快速产出的轻应用，最终用户是钉钉组织内成员，派生式消费」；momoi 是成熟自托管产品（15+ 路由、双 IM、Pi Agent、技能系统、VRM），最终用户是 PIN 自注册用户。与 D61 先例一致：momoi 对 homura 生态的既定取向是**取基础设施层（db），不交骨架与认证**。
 
 **将来重评的触发条件**（满足其一可重启）：① momoi 需要 qw-pages 部署；② 放弃 PIN 改纯外部 IdP；③ 引入稳定 user id 取代可变 username 主键；④ homura auth 链完成真实 IdP 端到端验证。
+
+---
+
+## D64：WorkBuddy 智能源——把插件内核移植进服务端，而非旁挂 xrl-router
+
+**日期**：2026-10-25
+
+**背景**：需要让「后台 → 网关」支持第二类智能源：除管理员自配置的 OpenAI 兼容端点外，可直接使用 WorkBuddy（CodeBuddy）账号。参考实现 `xrp-workbuddy` 是 xrl-router 的插件进程（WS 注册 V24 契约 + 独立端口 19069）；Momoi 是自托管单体应用，没有 xrl-router，也不应要求用户额外跑一个进程。
+
+**决策**：把参考实现的**核心**（自包含网页登录、token 续期与轮换、网关转发与身份头）移植为 `apps/server/src/ai/workbuddy/`，以 `gateway_source: 'custom' | 'workbuddy'` 作为网关第一项配置；凭证由服务端持有、AES-256-GCM 加密落 `settings` 表，并随服务启动一个每分钟巡检的 keeper 自动轮换。转发以 `provider.ts` 的一个分支接入——**不改 SSE 解析、不改工具调用聚合、不改既有错误链路**。
+
+**为什么不旁挂插件进程**：
+- ❌ 需要用户多跑一个服务、多占一个端口，并引入「插件未启动 → 全站空回复」的新故障面；Momoi 的定位是单进程自托管。
+- ❌ 插件的 WS 注册/模型目录推送是 xrl-router 契约，对 Momoi 没有对应物，保留即死代码。
+- ✅ 移植后只剩「登录 / 换票 / 转发」三件事，与 Momoi 的 provider 契约天然对齐（WorkBuddy 上游本就是 OpenAI SSE，Momoi 本来就只发流式请求）。
+
+**为什么不把凭证直接当 api_endpoint + api_key 填进配置**：
+- ❌ access token 有效期短、必须靠 refresh token 轮换；静态 URL+密钥配置无法在请求间换票，过期后全站对话失败且无法自动恢复。
+- ❌ WorkBuddy 要求 `X-User-Id` / `X-Domain` / `X-IDE-*` 等客户端身份头与链路头，静态配置也没有落点。
+- ✅ 服务端托管凭证 + 请求时取票，才能做到「登录一次，之后后台自动轮换」。
+
+**关键取舍**：
+- **凭证加密用与库同存的随机密钥**（`workbuddy_store_key`）：目的是让 token 不以可读形式出现在 settings 表、备份与 SQL 查询结果中；并不宣称能抵御拿到整库的攻击者（本项目 `api_key` 本就明文存库，如实记录，不夸大）。
+- **keeper 不看「当前是否选中 WorkBuddy」**：管理员可能已登录但尚未点保存，按已保存配置跳过轮换会让凭证悄悄过期。无凭证时每分钟只做一次空查询。
+- **不读取本机 WorkBuddy App 登录态**：参考实现的 `WORKBUDDY_USE_LEGACY_APP` 路径绑定特定机器与 App 版本，与自托管部署冲突，明确不做。
+- **登录在服务端完成、浏览器只负责授权**：前端关页不影响换票完成，避免「必须盯着页面」的脆弱登录。
+- **`gateway_source` 纳入配置导入导出白名单**（枚举校验 `CONFIG_IMPORT_BAD_GATEWAY_SOURCE`），但凭证不导出；导入到新实例后仍需登录一次。
+
+**影响**：
+- server：新增 `ai/workbuddy/*`（config / web-login / credentials / token-manager / chat）、`routes/workbuddy.ts`；`ai/provider.ts` 增加 workbuddy 分支；`lib/config.ts` 读写 `gateway_source`；`index.ts` 启动 keeper；`lib/config-transfer.ts` 白名单与校验
+- shared：`AppConfig.gateway_source`、`WorkBuddyStatus` / `WorkBuddyLoginStatus`、`CONFIG_IMPORT_BAD_GATEWAY_SOURCE`
+- web：网关页新增智能源选择与凭证面板；右上角「从环境变量加载」仅在自配置时显示；三语新增文案
+- 测试：`test/workbuddy-token.test.ts`（密文落库 / 续期写回 / 无凭证提示）、`test/config-transfer.test.ts` 增补 gateway_source 用例

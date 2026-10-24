@@ -303,7 +303,7 @@ routes/chat.ts
   │     ├── @earendil-works/pi-agent-core（runAgentLoop）
   │     ├── @earendil-works/pi-ai（createAssistantMessageEventStream）
   │     ├── @sinclair/typebox（工具参数 schema）
-  │     ├── ai/provider.ts（API 客户端）
+  │     ├── ai/provider.ts（API 客户端；gateway_source=workbuddy 时委托 ai/workbuddy/ 转发）
   │     ├── ai/tools.ts → tools/registry.ts（12 个内置工具）
   │     ├── skills/registry.ts（技能注册表）
   │     └── config.ts（获取 Agent 配置）
@@ -330,6 +330,7 @@ routes/admin.ts
   ├── auth.ts（JWT 认证）
   ├── config.ts（配置 + Agent CRUD + MCP Server CRUD + TTS 配置）
   ├── prompts/（提示词规则引擎，见 routes/prompts.ts —— 目录 / 单片段 / 预览）
+  ├── ai/workbuddy/（WorkBuddy 智能源，见 routes/workbuddy.ts —— 登录 / 凭证状态 / 退出）
   └── skills/loader.ts（技能注册表）
 
 routes/app.ts → config.ts
